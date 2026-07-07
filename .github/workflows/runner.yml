@@ -84,6 +84,8 @@ jobs:
         uses: anthropics/claude-code-base-action@v0.0.63
         with:
           prompt_file: ${{ runner.temp }}/heimdall-prompt.md
+          # The action's baked-in default model has been retired — always set one.
+          model: claude-sonnet-5
           allowed_tools: 'Edit,Read,Write,Glob,Grep,Bash(git:*),Bash(npm:*),Bash(npx:*)'
           max_turns: '50'
           # Set exactly one of these two as an Actions secret (SPEC §6.3).
