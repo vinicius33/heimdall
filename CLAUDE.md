@@ -25,4 +25,4 @@ npm-workspaces monorepo: `apps/gateway` (Hono service), `packages/linear` (Graph
 
 ## Portability intent
 
-Gateway must stay serverless-portable (future CF Workers/Vercel): no local disk, no long-lived in-process state — everything persistent goes to Upstash Redis.
+Gateway must stay serverless-portable (future CF Workers/Vercel): no local disk, no long-lived in-process state — everything persistent goes through the `KV` interface (`apps/gateway/src/kv.ts`), backed by Railway TCP Redis (`REDIS_URL`) or Upstash REST. A serverless move requires the REST backend (Workers can't do TCP).

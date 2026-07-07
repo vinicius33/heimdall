@@ -2,10 +2,14 @@
 
 Do the steps in this order; later steps need values from earlier ones.
 
-## 1. Upstash Redis → `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+## 1. Redis → `REDIS_URL`
 
-1. [console.upstash.com](https://console.upstash.com) → **Create Database** (Redis, any region near Railway).
-2. On the database page, scroll to the **REST API** section — copy `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` exactly as shown there.
+Easiest: run it inside the same Railway project (do this during step 4 if you prefer):
+
+1. In the Railway project: **Create → Database → Add Redis**.
+2. In the **gateway service** → Variables: add `REDIS_URL` = `${{Redis.REDIS_PRIVATE_URL}}` (Railway resolves the reference; the private URL stays on the internal network with no egress cost).
+
+Alternative — Upstash (only worth it if you later move the gateway to CF Workers/Vercel, which can't speak TCP Redis): [console.upstash.com](https://console.upstash.com) → Create Database → copy `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` from the **REST API** section, and leave `REDIS_URL` unset.
 
 ## 2. Callback secret → `HEIMDALL_CALLBACK_SECRET`
 
@@ -55,11 +59,11 @@ Visit `<PUBLIC_URL>/oauth/authorize` in your browser **as a workspace admin** an
 
 For **each target repo**: copy `stubs/heimdall.yml` to `.github/workflows/heimdall.yml` on the default branch, then in the repo → **Settings → Secrets and variables → Actions → New repository secret** (for work, prefer org-level secrets):
 
-| Secret | Where it comes from |
-|---|---|
-| `HEIMDALL_CALLBACK_SECRET` | the value you minted in step 2 |
-| `CLAUDE_CODE_OAUTH_TOKEN` | **personal (Max plan):** run `claude setup-token` on your machine, copy the token it prints |
-| `ANTHROPIC_API_KEY` | **work:** [console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key |
+| Secret                     | Where it comes from                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `HEIMDALL_CALLBACK_SECRET` | the value you minted in step 2                                                              |
+| `CLAUDE_CODE_OAUTH_TOKEN`  | **personal (Max plan):** run `claude setup-token` on your machine, copy the token it prints |
+| `ANTHROPIC_API_KEY`        | **work:** [console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key    |
 
 Set **exactly one** of the two Claude secrets per repo.
 

@@ -39,4 +39,24 @@ describe('loadConfig', () => {
       /HEIMDALL_ROUTES/,
     );
   });
+
+  it('accepts a plain REDIS_URL instead of the Upstash pair', () => {
+    const config = loadConfig({
+      ...validEnv,
+      UPSTASH_REDIS_REST_URL: undefined,
+      UPSTASH_REDIS_REST_TOKEN: undefined,
+      REDIS_URL: 'redis://default:pw@redis.railway.internal:6379',
+    });
+    expect(config.REDIS_URL).toBe('redis://default:pw@redis.railway.internal:6379');
+  });
+
+  it('rejects when no Redis config is present at all', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnv,
+        UPSTASH_REDIS_REST_URL: undefined,
+        UPSTASH_REDIS_REST_TOKEN: undefined,
+      }),
+    ).toThrow(/REDIS_URL/);
+  });
 });

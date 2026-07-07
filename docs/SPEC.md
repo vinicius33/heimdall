@@ -226,14 +226,14 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 
 ### 6.1 Gateway env
 
-| Var                                                          | Purpose                                                                                                                                                                                            |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET`                  | OAuth app                                                                                                                                                                                          |
-| `LINEAR_WEBHOOK_SECRET`                                      | HMAC verification                                                                                                                                                                                  |
-| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`) | dispatch auth                                                                                                                                                                                      |
-| `HEIMDALL_CALLBACK_SECRET`                                   | runner ↔ gateway auth                                                                                                                                                                              |
-| `HEIMDALL_ROUTES`                                            | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"viniciussouza/sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`        | KV                                                                                                                                                                                                 |
+| Var                                                                      | Purpose                                                                                                                                                                                            |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET`                              | OAuth app                                                                                                                                                                                          |
+| `LINEAR_WEBHOOK_SECRET`                                                  | HMAC verification                                                                                                                                                                                  |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`)             | dispatch auth                                                                                                                                                                                      |
+| `HEIMDALL_CALLBACK_SECRET`                                               | runner ↔ gateway auth                                                                                                                                                                              |
+| `HEIMDALL_ROUTES`                                                        | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"viniciussouza/sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
+| `REDIS_URL` **or** `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | KV — plain TCP Redis (Railway one-click) or Upstash REST; both implement the gateway `KV` interface                                                                                                |
 
 ### 6.2 Redis keys
 

@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { createClient } from 'redis';
 
 export interface KV {
   get(key: string): Promise<string | null>;
@@ -32,6 +33,32 @@ export class MemoryKV implements KV {
   }
 }
 
+/** Plain TCP Redis (Railway's one-click Redis, or any redis:// URL). */
+export function redisKV(url: string): KV {
+  const client = createClient({ url });
+  client.on('error', (err) =>
+    console.error(JSON.stringify({ level: 'error', message: 'redis error', error: String(err) })),
+  );
+  let connecting: Promise<unknown> | null = null;
+  const ready = () => (connecting ??= client.connect());
+  return {
+    async get(key) {
+      await ready();
+      return (await client.get(key)) ?? null;
+    },
+    async set(key, value, ttlSeconds) {
+      await ready();
+      if (ttlSeconds !== undefined) await client.set(key, value, { EX: ttlSeconds });
+      else await client.set(key, value);
+    },
+    async del(key) {
+      await ready();
+      await client.del(key);
+    },
+  };
+}
+
+/** Upstash REST Redis — required if the gateway ever moves to CF Workers/Vercel. */
 export function upstashKV(url: string, token: string): KV {
   // We store raw strings (often JSON) — disable auto-deserialization so
   // get() returns exactly what set() wrote.

@@ -31,11 +31,15 @@ const envSchema = z
         return z.NEVER;
       }
     }),
-    UPSTASH_REDIS_REST_URL: z.string().url(),
-    UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
+    REDIS_URL: z.string().url().optional(),
+    UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+    UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
   })
   .refine((env) => (env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY) || env.GITHUB_PAT, {
     message: 'set GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY, or GITHUB_PAT',
+  })
+  .refine((env) => env.REDIS_URL || (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN), {
+    message: 'set REDIS_URL, or UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN',
   });
 
 export type Config = z.infer<typeof envSchema>;
