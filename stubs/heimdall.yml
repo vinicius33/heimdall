@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   run:
-    uses: viniciussouza/heimdall/.github/workflows/runner.yml@main
+    uses: vinicius33/heimdall/.github/workflows/runner.yml@main
     with:
       payload: ${{ toJSON(github.event.client_payload) }}
     secrets: inherit

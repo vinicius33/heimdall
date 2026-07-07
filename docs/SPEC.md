@@ -138,7 +138,7 @@ on:
     types: [heimdall]
 jobs:
   run:
-    uses: viniciussouza/heimdall/.github/workflows/runner.yml@main
+    uses: vinicius33/heimdall/.github/workflows/runner.yml@main
     with:
       payload: ${{ toJSON(github.event.client_payload) }}
     secrets: inherit
@@ -232,7 +232,7 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 | `LINEAR_WEBHOOK_SECRET`                                                  | HMAC verification                                                                                                                                                                                  |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`)             | dispatch auth                                                                                                                                                                                      |
 | `HEIMDALL_CALLBACK_SECRET`                                               | runner ↔ gateway auth                                                                                                                                                                              |
-| `HEIMDALL_ROUTES`                                                        | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"viniciussouza/sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
+| `HEIMDALL_ROUTES`                                                        | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"vinicius33/heimdall-sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
 | `REDIS_URL` **or** `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | KV — plain TCP Redis (Railway one-click) or Upstash REST; both implement the gateway `KV` interface                                                                                                |
 
 ### 6.2 Redis keys

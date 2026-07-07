@@ -7,7 +7,7 @@ Do the steps in this order; later steps need values from earlier ones.
 Easiest: run it inside the same Railway project (do this during step 4 if you prefer):
 
 1. In the Railway project: **Create → Database → Add Redis**.
-2. In the **gateway service** → Variables: add `REDIS_URL` = `${{Redis.REDIS_PRIVATE_URL}}` (Railway resolves the reference; the private URL stays on the internal network with no egress cost).
+2. In the **gateway service** → Variables: add `REDIS_URL` = `${{Redis.REDIS_URL}}` (Railway resolves the reference; the private URL stays on the internal network with no egress cost).
 
 Alternative — Upstash (only worth it if you later move the gateway to CF Workers/Vercel, which can't speak TCP Redis): [console.upstash.com](https://console.upstash.com) → Create Database → copy `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` from the **REST API** section, and leave `REDIS_URL` unset.
 
@@ -40,7 +40,7 @@ It goes in **two places**: the gateway env (Railway) and each target repo's Acti
 2. Service settings: build command `npm ci && npm run build`, start command `npm start`.
 3. **Settings → Networking → Generate Domain** → the `https://….up.railway.app` URL is `PUBLIC_URL` (no trailing slash).
 4. **Variables** tab: set everything from `.env.example` — you now have all of them except the Linear trio (next step); add those after step 5 and redeploy.
-5. `HEIMDALL_ROUTES`: you author it. Keys are Linear **team keys** — the prefix in issue identifiers (`ENG-42` → `ENG`), visible in Linear team settings. `"*"` is the catch-all. Example: `{"ENG":"acme/backend","*":"viniciussouza/sandbox"}`.
+5. `HEIMDALL_ROUTES`: you author it. Keys are Linear **team keys** — the prefix in issue identifiers (`ENG-42` → `ENG`), visible in Linear team settings. `"*"` is the catch-all. Example: `{"ENG":"acme/backend","*":"vinicius33/heimdall-sandbox"}`.
 
 ## 5. Linear OAuth app → `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`
 
