@@ -71,8 +71,11 @@ jobs:
         env:
           BRANCH: ${{ steps.p.outputs.branch }}
         run: |
-          git config user.name "heimdall[bot]"
-          git config user.email "heimdall[bot]@users.noreply.github.com"
+          # Identity of OUR GitHub App's bot user (heimdallz — "heimdall" is a
+          # different app owned by someone else). The id+slug email format is
+          # what makes GitHub attribute commits/co-authorship to the right bot.
+          git config user.name "heimdallz[bot]"
+          git config user.email "300811537+heimdallz[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
             git fetch origin "$BRANCH"
             git checkout "$BRANCH"
