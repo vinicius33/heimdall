@@ -57,7 +57,11 @@ Visit `<PUBLIC_URL>/oauth/authorize` in your browser **as a workspace admin** an
 
 ## 7. Claude auth → target-repo Actions secrets
 
-For **each target repo**: copy `stubs/heimdall.yml` to `.github/workflows/heimdall.yml` on the default branch, then in the repo → **Settings → Secrets and variables → Actions → New repository secret** (for work, prefer org-level secrets):
+For **each target repo**:
+
+1. Copy `stubs/heimdall.yml` to `.github/workflows/heimdall.yml` on the default branch.
+2. **Settings → Actions → General → Workflow permissions**: check **"Allow GitHub Actions to create and approve pull requests"** (off by default; without it `gh pr create` fails with "GitHub Actions is not permitted to create or approve pull requests").
+3. **Settings → Secrets and variables → Actions → New repository secret** (for work, prefer org-level secrets):
 
 | Secret                     | Where it comes from                                                                         |
 | -------------------------- | ------------------------------------------------------------------------------------------- |
