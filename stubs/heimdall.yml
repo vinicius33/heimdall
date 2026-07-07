@@ -18,4 +18,8 @@ jobs:
     uses: vinicius33/heimdall/.github/workflows/runner.yml@main
     with:
       payload: ${{ toJSON(github.event.client_payload) }}
+      # Optional: override the Claude Code tool allowlist for this repo, e.g.
+      # to allow the test runner or build tools. Keep network tools out —
+      # issue text is untrusted input.
+      # allowed_tools: 'Edit,Read,Write,Glob,Grep,TodoWrite,Bash(git:*),Bash(npm:*),Bash(npx:*),Bash(cat:*),Bash(ls:*),Bash(make:*)'
     secrets: inherit
