@@ -6,7 +6,7 @@ Linear ↔ Claude Code agent. @heimdall on a Linear issue → Gateway (Hono on R
 
 ## Layout
 
-pnpm monorepo: `apps/gateway` (Hono service), `packages/linear` (GraphQL client: sessions/activities/OAuth), `packages/github` (App auth, dispatch, run status), `packages/core` (shared types, zod config), `.github/workflows/runner.yml` (reusable runner), `stubs/heimdall.yml` (per-target-repo stub).
+npm-workspaces monorepo: `apps/gateway` (Hono service), `packages/linear` (GraphQL client: sessions/activities/OAuth), `packages/github` (App auth, dispatch, run status), `packages/core` (shared types, zod config), `.github/workflows/runner.yml` (reusable runner), `stubs/heimdall.yml` (per-target-repo stub).
 
 ## Standards
 

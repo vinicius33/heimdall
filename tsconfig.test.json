@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "baseUrl": ".",
+    "types": ["node", "jest"],
+    "paths": {
+      "@heimdall/core": ["packages/core/src"],
+      "@heimdall/linear": ["packages/linear/src"],
+      "@heimdall/github": ["packages/github/src"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"]
+}

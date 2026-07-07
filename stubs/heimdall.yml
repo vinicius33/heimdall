@@ -1,0 +1,21 @@
+# Copy this file to .github/workflows/heimdall.yml in every target repo,
+# then add the Actions secrets: HEIMDALL_CALLBACK_SECRET and exactly one of
+# CLAUDE_CODE_OAUTH_TOKEN (personal / Max subscription) or ANTHROPIC_API_KEY (work).
+name: heimdall
+
+on:
+  repository_dispatch:
+    types: [heimdall]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  run:
+    uses: viniciussouza/heimdall/.github/workflows/runner.yml@main
+    with:
+      payload: ${{ toJSON(github.event.client_payload) }}
+    secrets: inherit

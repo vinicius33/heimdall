@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/linear" },
+    { "path": "packages/github" },
+    { "path": "apps/gateway" }
+  ]
+}

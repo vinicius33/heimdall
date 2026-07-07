@@ -11,7 +11,7 @@ There is no persistent agent server. A thin **Gateway** (Hono/TypeScript on Rail
 
 ### Non-goals (v1)
 
-- No Sandcastle / self-managed sandboxes (GitHub Actions *is* the sandbox).
+- No Sandcastle / self-managed sandboxes (GitHub Actions _is_ the sandbox).
 - No serverless migration yet (design for it: Hono + Redis, no local disk, no long-lived processes).
 - No Claude Code session resume across runs (follow-ups reconstruct context; `actions/cache` resume is a stretch goal).
 - Single Linear workspace per deployment is acceptable, but keep tokens keyed by workspace id.
@@ -50,7 +50,7 @@ flowchart LR
     OA -- "actor=app install" --> Linear
 ```
 
-**Monorepo layout** (pnpm workspaces, TypeScript strict, Node 20+, Jest, ESLint + Prettier):
+**Monorepo layout** (npm workspaces, TypeScript strict, Node 20+, Jest, ESLint + Prettier):
 
 ```
 heimdall/
@@ -91,12 +91,12 @@ https://linear.app/oauth/authorize?client_id=...&redirect_uri=<GATEWAY>/oauth/ca
 
 ### 3.3 Agent session lifecycle rules (hard requirements)
 
-| Rule | Value |
-|---|---|
-| First activity after `created` | **≤ 10 seconds**, or session shows unresponsive → emit an ack `thought` synchronously in the webhook handler, before dispatching |
-| HTTP webhook response | ≤ 5 seconds |
-| Idle → `stale` | 30 min without activity (recoverable by emitting another activity) |
-| Session states (Linear-inferred, never set manually) | `pending, active, error, awaitingInput, complete, stale` |
+| Rule                                                 | Value                                                                                                                            |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| First activity after `created`                       | **≤ 10 seconds**, or session shows unresponsive → emit an ack `thought` synchronously in the webhook handler, before dispatching |
+| HTTP webhook response                                | ≤ 5 seconds                                                                                                                      |
+| Idle → `stale`                                       | 30 min without activity (recoverable by emitting another activity)                                                               |
+| Session states (Linear-inferred, never set manually) | `pending, active, error, awaitingInput, complete, stale`                                                                         |
 
 Activities are emitted with `mutation agentActivityCreate(input: { agentSessionId, content: { type, ... } })`. Types: `thought`, `action` (tool call + optional result), `elicitation` (ask user), `response` (terminal success), `error` (terminal failure). Terminal `response`/`elicitation`/`error` also auto-post a comment on the issue. `mutation agentSessionUpdate` sets `externalUrls` (link the GitHub run/PR) and `plan`. Exact input shapes are in **§9** — implement `packages/linear` against those, not guesses from prose docs.
 
@@ -155,8 +155,8 @@ Reusable workflow steps:
 - uses: anthropics/claude-code-action@v1.x.y
   with:
     prompt: ${{ steps.context.outputs.prompt }}
-    claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # personal (Max, via `claude setup-token`)
-    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}              # work — set exactly one of the two
+    claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }} # personal (Max, via `claude setup-token`)
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }} # work — set exactly one of the two
     claude_args: |
       --max-turns 50
       --allowedTools Edit,Read,Write,Bash(git *),Bash(npm *),Bash(npx *)
@@ -226,14 +226,14 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 
 ### 6.1 Gateway env
 
-| Var | Purpose |
-|---|---|
-| `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET` | OAuth app |
-| `LINEAR_WEBHOOK_SECRET` | HMAC verification |
-| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`) | dispatch auth |
-| `HEIMDALL_CALLBACK_SECRET` | runner ↔ gateway auth |
-| `HEIMDALL_ROUTES` | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"viniciussouza/sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | KV |
+| Var                                                          | Purpose                                                                                                                                                                                            |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET`                  | OAuth app                                                                                                                                                                                          |
+| `LINEAR_WEBHOOK_SECRET`                                      | HMAC verification                                                                                                                                                                                  |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`) | dispatch auth                                                                                                                                                                                      |
+| `HEIMDALL_CALLBACK_SECRET`                                   | runner ↔ gateway auth                                                                                                                                                                              |
+| `HEIMDALL_ROUTES`                                            | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"viniciussouza/sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`        | KV                                                                                                                                                                                                 |
 
 ### 6.2 Redis keys
 
@@ -248,14 +248,14 @@ session:{agentSessionId}           → { issueId, repo, branch, runId, prUrl, st
 
 ## 7. Milestones (implementation order)
 
-1. **M1 — Gateway skeleton**: Hono app, health check, Linear OAuth flow, webhook endpoint with HMAC verify + ack `thought` within deadlines, Redis wiring. *Verify: install into a test workspace, @heimdall a ticket, see the ack thought appear.*
-2. **M2 — Dispatch + runner**: GitHub App auth, route resolution, `repository_dispatch`, reusable workflow + stub, claude-code-action run, PR creation. *Verify: mention → PR opens on a sandbox repo.*
-3. **M3 — Status reporting**: callback endpoints, context endpoint, milestone→activity mapping, external run URL on session. *Verify: ticket shows thought → actions → response with PR link.*
-4. **M4 — Follow-ups + stop**: `prompted` handling (incl. `signal: stop` → cancel run), branch reuse/PR update, unassignment cancel, error paths. *Verify: reply on the session updates the same PR; pressing stop cancels the Actions run.*
+1. **M1 — Gateway skeleton**: Hono app, health check, Linear OAuth flow, webhook endpoint with HMAC verify + ack `thought` within deadlines, Redis wiring. _Verify: install into a test workspace, @heimdall a ticket, see the ack thought appear._
+2. **M2 — Dispatch + runner**: GitHub App auth, route resolution, `repository_dispatch`, reusable workflow + stub, claude-code-action run, PR creation. _Verify: mention → PR opens on a sandbox repo._
+3. **M3 — Status reporting**: callback endpoints, context endpoint, milestone→activity mapping, external run URL on session. _Verify: ticket shows thought → actions → response with PR link._
+4. **M4 — Follow-ups + stop**: `prompted` handling (incl. `signal: stop` → cancel run), branch reuse/PR update, unassignment cancel, error paths. _Verify: reply on the session updates the same PR; pressing stop cancels the Actions run._
 
 ## 8. Risks / gotchas (read before coding)
 
-- **10-second ack** is the tightest constraint — emit the ack `thought` *inside* the webhook handler before any GitHub call.
+- **10-second ack** is the tightest constraint — emit the ack `thought` _inside_ the webhook handler before any GitHub call.
 - `client_payload` limits (10 props / 64 KB) — never inline prompt context in the dispatch; always fetch from the Gateway.
 - `claude-code-action` OAuth-token phase bug (repo issue #676) — pin an exact release and test the subscription-token path first.
 - `repository_dispatch` requires the App/PAT token; the default `GITHUB_TOKEN` cannot trigger it.
@@ -272,14 +272,14 @@ Input: `agentSessionId: String!`, `content: JSONObject!`, `ephemeral: Boolean` (
 
 `content` per type (`body`/`result` are Markdown; server does not enforce these shapes):
 
-| `content.type` | fields |
-|---|---|
-| `thought` | `body: string!` |
-| `action` | `action: string!`, `parameter: string!`, `result?: string` |
-| `elicitation` | `body: string!` |
-| `response` | `body: string!` |
-| `error` | `body: string!`, `reasonCode?: string` |
-| `prompt` | receive-only (user-generated): `body: string!` |
+| `content.type` | fields                                                     |
+| -------------- | ---------------------------------------------------------- |
+| `thought`      | `body: string!`                                            |
+| `action`       | `action: string!`, `parameter: string!`, `result?: string` |
+| `elicitation`  | `body: string!`                                            |
+| `response`     | `body: string!`                                            |
+| `error`        | `body: string!`, `reasonCode?: string`                     |
+| `prompt`       | receive-only (user-generated): `body: string!`             |
 
 ### 9.2 `agentSessionUpdate(id: String!, input: AgentSessionUpdateInput!)`
 

@@ -1,0 +1,170 @@
+# Reusable Heimdall runner (SPEC §4.3). Target repos call this from a small
+# stub workflow (see stubs/heimdall.yml) triggered by repository_dispatch.
+name: heimdall-runner
+
+on:
+  workflow_call:
+    inputs:
+      payload:
+        description: JSON client_payload from the repository_dispatch event
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  heimdall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CALLBACK_SECRET: ${{ secrets.HEIMDALL_CALLBACK_SECRET }}
+    steps:
+      - name: Parse payload
+        id: p
+        env:
+          PAYLOAD: ${{ inputs.payload }}
+        run: |
+          {
+            echo "session_id=$(jq -r '.session_id' <<<"$PAYLOAD")"
+            echo "issue_id=$(jq -r '.issue_id' <<<"$PAYLOAD")"
+            echo "issue_title=$(jq -r '.issue_title' <<<"$PAYLOAD")"
+            echo "issue_url=$(jq -r '.issue_url' <<<"$PAYLOAD")"
+            echo "branch=$(jq -r '.branch' <<<"$PAYLOAD")"
+            echo "kind=$(jq -r '.kind' <<<"$PAYLOAD")"
+            echo "callback_url=$(jq -r '.callback_url' <<<"$PAYLOAD")"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Report started
+        env:
+          CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SESSION_ID: ${{ steps.p.outputs.session_id }}
+        run: |
+          jq -n --arg sid "$SESSION_ID" --arg url "$RUN_URL" \
+            '{session_id: $sid, event: "started", run_url: $url}' |
+          curl -fsS -X POST "$CALLBACK_URL/callback" \
+            -H "authorization: Bearer $CALLBACK_SECRET" \
+            -H "content-type: application/json" \
+            -d @-
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare branch
+        env:
+          BRANCH: ${{ steps.p.outputs.branch }}
+        run: |
+          git config user.name "heimdall[bot]"
+          git config user.email "heimdall[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+
+      - name: Fetch prompt context
+        env:
+          CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
+          SESSION_ID: ${{ steps.p.outputs.session_id }}
+        run: |
+          curl -fsS "$CALLBACK_URL/context/$SESSION_ID" \
+            -H "authorization: Bearer $CALLBACK_SECRET" \
+            -o "$RUNNER_TEMP/heimdall-prompt.md"
+
+      - name: Run Claude Code
+        # TODO: pin to an exact release before production use (SPEC §8 —
+        # floating tags have bitten people via the OAuth-token phase bug).
+        uses: anthropics/claude-code-base-action@v1
+        with:
+          prompt_file: ${{ runner.temp }}/heimdall-prompt.md
+          allowed_tools: 'Edit,Read,Write,Glob,Grep,Bash(git:*),Bash(npm:*),Bash(npx:*)'
+          max_turns: '50'
+          # Set exactly one of these two as an Actions secret (SPEC §6.3).
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Push branch
+        id: push
+        env:
+          BRANCH: ${{ steps.p.outputs.branch }}
+          ISSUE_ID: ${{ steps.p.outputs.issue_id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add -A
+            git commit -m "chore: heimdall run artifacts for $ISSUE_ID"
+          fi
+          if [ "$(git rev-list --count "origin/$DEFAULT_BRANCH..HEAD")" = "0" ]; then
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          else
+            git push -u origin "$BRANCH"
+            echo "changed=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update PR
+        id: pr
+        if: steps.push.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.p.outputs.branch }}
+          ISSUE_ID: ${{ steps.p.outputs.issue_id }}
+          ISSUE_TITLE: ${{ steps.p.outputs.issue_title }}
+          ISSUE_URL: ${{ steps.p.outputs.issue_url }}
+        run: |
+          PR_URL=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url // empty')
+          if [ -z "$PR_URL" ]; then
+            PR_BODY="Automated by Heimdall for Linear issue [$ISSUE_ID]($ISSUE_URL)."
+            PR_BODY="$PR_BODY"$'\n\n'"🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+            PR_URL=$(gh pr create \
+              --head "$BRANCH" \
+              --title "$ISSUE_ID: $ISSUE_TITLE" \
+              --body "$PR_BODY")
+          fi
+          echo "pr_url=$PR_URL" >>"$GITHUB_OUTPUT"
+
+      - name: Report completed
+        if: success() && steps.push.outputs.changed == 'true'
+        env:
+          CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
+          SESSION_ID: ${{ steps.p.outputs.session_id }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+        run: |
+          jq -n --arg sid "$SESSION_ID" --arg pr "$PR_URL" \
+            '{session_id: $sid, event: "completed", pr_url: $pr}' |
+          curl -fsS -X POST "$CALLBACK_URL/callback" \
+            -H "authorization: Bearer $CALLBACK_SECRET" \
+            -H "content-type: application/json" \
+            -d @-
+
+      - name: Report no changes
+        if: success() && steps.push.outputs.changed != 'true'
+        env:
+          CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
+          SESSION_ID: ${{ steps.p.outputs.session_id }}
+        run: |
+          jq -n --arg sid "$SESSION_ID" \
+            '{session_id: $sid, event: "failed", message: "The run finished without producing any changes."}' |
+          curl -fsS -X POST "$CALLBACK_URL/callback" \
+            -H "authorization: Bearer $CALLBACK_SECRET" \
+            -H "content-type: application/json" \
+            -d @-
+
+      - name: Report failure
+        if: failure()
+        env:
+          CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
+          SESSION_ID: ${{ steps.p.outputs.session_id }}
+        run: |
+          jq -n --arg sid "$SESSION_ID" \
+            '{session_id: $sid, event: "failed", message: "The GitHub Actions run failed — check the logs."}' |
+          curl -fsS -X POST "$CALLBACK_URL/callback" \
+            -H "authorization: Bearer $CALLBACK_SECRET" \
+            -H "content-type: application/json" \
+            -d @- || true
