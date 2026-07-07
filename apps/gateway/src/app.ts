@@ -187,7 +187,6 @@ export function createApp(deps: Deps): Hono {
           content: {
             type: 'error',
             body: `Run failed${body.message ? `:\n\n${body.message}` : '.'}${record.runUrl ? `\n\nLogs: ${record.runUrl}` : ''}`,
-            reasonCode: 'run_failed',
           },
         });
         break;

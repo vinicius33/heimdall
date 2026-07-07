@@ -19,11 +19,12 @@ async function reportError(
   client: LinearGraphQL,
   agentSessionId: string,
   body: string,
-  reasonCode: string,
 ): Promise<void> {
+  // No reasonCode: Linear validates it against a fixed enum of GitHub-app-specific
+  // codes (see AgentActivityErrorReasonCode) — none fit; the body carries the detail.
   await createAgentActivity(client, {
     agentSessionId,
-    content: { type: 'error', body, reasonCode },
+    content: { type: 'error', body },
   }).catch((err) => log('error', 'failed to report error activity', { error: String(err) }));
 }
 
@@ -34,7 +35,7 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
   try {
     const issueRef = event.agentSession.issue;
     if (!issueRef?.id) {
-      await reportError(client, sessionId, 'This session has no linked issue.', 'no_issue');
+      await reportError(client, sessionId, 'This session has no linked issue.');
       return;
     }
     const issue = await fetchIssue(client, issueRef.id);
@@ -49,7 +50,6 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
         client,
         sessionId,
         `No repository mapped for team \`${issue.team.key}\`. Add it to \`HEIMDALL_ROUTES\` or put \`[repo=owner/name]\` in the issue description.`,
-        'route_unresolved',
       );
       return;
     }
@@ -78,7 +78,7 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
     await dispatchRun(deps, client, sessionId, record, 'created');
   } catch (err) {
     log('error', 'processCreated failed', { sessionId, error: String(err) });
-    await reportError(client, sessionId, `Failed to dispatch: ${String(err)}`, 'dispatch_failed');
+    await reportError(client, sessionId, `Failed to dispatch: ${String(err)}`);
   }
 }
 
@@ -93,7 +93,6 @@ export async function processPrompted(deps: Deps, event: AgentSessionEventPayloa
         client,
         sessionId,
         'I lost track of this session (state expired). Please start over with a fresh mention.',
-        'unknown_session',
       );
       return;
     }
@@ -103,7 +102,7 @@ export async function processPrompted(deps: Deps, event: AgentSessionEventPayloa
     await dispatchRun(deps, client, sessionId, record, 'prompted');
   } catch (err) {
     log('error', 'processPrompted failed', { sessionId, error: String(err) });
-    await reportError(client, sessionId, `Failed to dispatch: ${String(err)}`, 'dispatch_failed');
+    await reportError(client, sessionId, `Failed to dispatch: ${String(err)}`);
   }
 }
 
@@ -167,7 +166,7 @@ export async function processStop(deps: Deps, event: AgentSessionEventPayload): 
   }
   await createAgentActivity(client, {
     agentSessionId: sessionId,
-    content: { type: 'error', body: 'Stopped at your request.', reasonCode: 'user_stopped' },
+    content: { type: 'error', body: 'Stopped at your request.' },
   });
 }
 

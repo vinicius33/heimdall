@@ -125,7 +125,7 @@ Create app **"heimdall"**, permissions: Contents R/W, Pull requests R/W, Issues 
 }
 ```
 
-Use `return_run_details: true` on the dispatch call to get `workflow_run_id` + `html_url` back in the 200 response ([GitHub changelog 2026-02-19](https://github.blog/changelog/2026-02-19-workflow-dispatch-api-now-returns-run-ids/)); store the run id in the session record and set it as the session's external URL.
+`return_run_details` is **workflow_dispatch-only** (repository_dispatch 422s on the unknown key — verified live 2026-07-07). To find the run: after the 204, poll `GET /actions/runs?event=repository_dispatch` and take the newest run created after dispatch time; store the run id in the session record and set it as the session's external URL.
 
 ### 4.3 Runner workflow (`.github/workflows/runner.yml`, reusable via `workflow_call`)
 
@@ -195,7 +195,7 @@ sequenceDiagram
     G->>L: agentActivityCreate(thought "On it — dispatching…") [≤10s]
     G->>L: move issue to first "started" state
     Note over G: resolve route: team key / [repo=…] override → owner/repo
-    G->>GH: repository_dispatch (heimdall, return_run_details)
+    G->>GH: repository_dispatch (heimdall) + poll for run
     GH-->>G: run_id + html_url
     G->>L: agentSessionUpdate(externalUrls += run html_url)
     GH->>W: start job
@@ -218,7 +218,7 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 
 - Dispatch fails / route unresolved → immediate `error` activity ("no repo mapped for team X — add it to HEIMDALL_ROUTES or use [repo=owner/name]").
 - Workflow fails → `failed` callback → `error` activity with log tail + run URL.
-- **User stop**: a `prompted` webhook whose `agentActivity.signal == "stop"` is the canonical cancel — Gateway cancels the run (`POST /repos/{o}/{r}/actions/runs/{id}/cancel`) and emits an `error` activity with `reasonCode: "user_stopped"` (there is no agent-side cancel mutation; session status is inferred from activities).
+- **User stop**: a `prompted` webhook whose `agentActivity.signal == "stop"` is the canonical cancel — Gateway cancels the run (`POST /repos/{o}/{r}/actions/runs/{id}/cancel`) and emits an `error` activity (there is no agent-side cancel mutation; session status is inferred from activities).
 - `issueUnassignedFromYou` inbox notification → same cancel path, final `thought` ("Stopped by unassignment").
 - Runs longer than GitHub's 6h job limit are out of scope; `--max-turns` bounds runaway sessions.
 
@@ -226,14 +226,14 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 
 ### 6.1 Gateway env
 
-| Var                                                                      | Purpose                                                                                                                                                                                            |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET`                              | OAuth app                                                                                                                                                                                          |
-| `LINEAR_WEBHOOK_SECRET`                                                  | HMAC verification                                                                                                                                                                                  |
-| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`)             | dispatch auth                                                                                                                                                                                      |
-| `HEIMDALL_CALLBACK_SECRET`                                               | runner ↔ gateway auth                                                                                                                                                                              |
+| Var                                                                      | Purpose                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LINEAR_CLIENT_ID` / `LINEAR_CLIENT_SECRET`                              | OAuth app                                                                                                                                                                                                |
+| `LINEAR_WEBHOOK_SECRET`                                                  | HMAC verification                                                                                                                                                                                        |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`)             | dispatch auth                                                                                                                                                                                            |
+| `HEIMDALL_CALLBACK_SECRET`                                               | runner ↔ gateway auth                                                                                                                                                                                    |
 | `HEIMDALL_ROUTES`                                                        | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"vinicius33/heimdall-sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
-| `REDIS_URL` **or** `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | KV — plain TCP Redis (Railway one-click) or Upstash REST; both implement the gateway `KV` interface                                                                                                |
+| `REDIS_URL` **or** `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | KV — plain TCP Redis (Railway one-click) or Upstash REST; both implement the gateway `KV` interface                                                                                                      |
 
 ### 6.2 Redis keys
 
@@ -259,7 +259,7 @@ session:{agentSessionId}           → { issueId, repo, branch, runId, prUrl, st
 - `client_payload` limits (10 props / 64 KB) — never inline prompt context in the dispatch; always fetch from the Gateway.
 - `claude-code-action` OAuth-token phase bug (repo issue #676) — pin an exact release and test the subscription-token path first.
 - `repository_dispatch` requires the App/PAT token; the default `GITHUB_TOKEN` cannot trigger it.
-- `agentActivityCreate.content` is `JSONObject!` — the server does **not** validate per-type shapes; a typo'd field fails silently in the UI. Type it strictly in `packages/linear` per §9.
+- `agentActivityCreate.content` is `JSONObject!` and mostly unvalidated — **except `error.reasonCode`, which IS validated** against a fixed enum (verified live: `noCodeAccess|noGitHubConnection|missingCommitSigningKey|noPolicyRepos|personalAccessDenied|githubTransientError|repoNotInPolicy|requiresGithubConnection`). Omit it unless one fits. Type everything strictly in `packages/linear` per §9.
 - Prompt-injection surface: issue text is untrusted input executed with repo write access. Mitigate with `--allowedTools` (no `WebFetch`/`WebSearch`), review-before-merge (agent never merges), and target-repo choice.
 
 ## 9. Linear API schemas (verified against `schema.graphql`, July 2026)
@@ -278,7 +278,7 @@ Input: `agentSessionId: String!`, `content: JSONObject!`, `ephemeral: Boolean` (
 | `action`       | `action: string!`, `parameter: string!`, `result?: string` |
 | `elicitation`  | `body: string!`                                            |
 | `response`     | `body: string!`                                            |
-| `error`        | `body: string!`, `reasonCode?: string`                     |
+| `error`        | `body: string!`, `reasonCode?` — validated enum, see §8    |
 | `prompt`       | receive-only (user-generated): `body: string!`             |
 
 ### 9.2 `agentSessionUpdate(id: String!, input: AgentSessionUpdateInput!)`

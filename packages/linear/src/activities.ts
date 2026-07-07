@@ -1,15 +1,27 @@
 import type { LinearGraphQL } from './client';
 
 /**
- * Content shapes per SPEC §9.1 — the API takes JSONObject and does NOT validate
- * these server-side, so this union is the contract. body/result are Markdown.
+ * Error reasonCode IS validated server-side against this exact enum
+ * (verified empirically 2026-07-07 — the docs' "not strictly typed" claim
+ * does not hold for this field). Omit it unless one of these fits.
  */
+export type AgentActivityErrorReasonCode =
+  | 'noCodeAccess'
+  | 'noGitHubConnection'
+  | 'missingCommitSigningKey'
+  | 'noPolicyRepos'
+  | 'personalAccessDenied'
+  | 'githubTransientError'
+  | 'repoNotInPolicy'
+  | 'requiresGithubConnection';
+
+/** Content shapes per SPEC §9.1. body/result are Markdown. */
 export type AgentActivityContent =
   | { type: 'thought'; body: string }
   | { type: 'action'; action: string; parameter: string; result?: string }
   | { type: 'elicitation'; body: string }
   | { type: 'response'; body: string }
-  | { type: 'error'; body: string; reasonCode?: string };
+  | { type: 'error'; body: string; reasonCode?: AgentActivityErrorReasonCode };
 
 export type AgentActivitySignal = 'auth' | 'continue' | 'select' | 'stop';
 

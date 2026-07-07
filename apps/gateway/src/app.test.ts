@@ -193,7 +193,9 @@ describe('POST /webhooks/linear', () => {
     await flush();
 
     expect(cancelRun).toHaveBeenCalledWith('gh-token', 'acme/backend', 7);
-    const errorCall = calls.find((call) => JSON.stringify(call.variables).includes('user_stopped'));
+    const errorCall = calls.find((call) =>
+      JSON.stringify(call.variables).includes('Stopped at your request'),
+    );
     expect(errorCall).toBeDefined();
     expect((await store.getSession('sess-1'))?.status).toBe('stopped');
   });
@@ -211,7 +213,7 @@ describe('POST /webhooks/linear', () => {
       headers: { 'linear-signature': signature },
     });
     await flush();
-    expect(JSON.stringify(calls)).toContain('unknown_session');
+    expect(JSON.stringify(calls)).toContain('lost track of this session');
   });
 
   it('acks webhooks for uninstalled workspaces without crashing', async () => {
