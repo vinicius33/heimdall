@@ -79,9 +79,9 @@ jobs:
             -o "$RUNNER_TEMP/heimdall-prompt.md"
 
       - name: Run Claude Code
-        # TODO: pin to an exact release before production use (SPEC §8 —
-        # floating tags have bitten people via the OAuth-token phase bug).
-        uses: anthropics/claude-code-base-action@v1
+        # Pinned exact release (SPEC §8). NOTE: base-action has no v1 tag —
+        # only v0.0.x. Bump deliberately, never float.
+        uses: anthropics/claude-code-base-action@v0.0.63
         with:
           prompt_file: ${{ runner.temp }}/heimdall-prompt.md
           allowed_tools: 'Edit,Read,Write,Glob,Grep,Bash(git:*),Bash(npm:*),Bash(npx:*)'
