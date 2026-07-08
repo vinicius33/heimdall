@@ -7,7 +7,7 @@
 
 Heimdall is a Linear agent: mention or assign **@heimdall** on a Linear issue and it clones the mapped GitHub repo, does the work with Claude Code, opens a PR, and reports progress natively in the issue via Linear agent activities. Follow-up replies in the same session continue on the same branch/PR.
 
-There is no persistent agent server. A thin **Gateway** (Hono/TypeScript on Railway, portable to serverless later) receives Linear webhooks and dispatches jobs to **GitHub Actions**, where `anthropics/claude-code-action` runs Claude Code. State lives in **Upstash Redis**.
+There is no persistent agent server. A thin **Gateway** (Hono/TypeScript on Railway, portable to serverless later) receives Linear webhooks and dispatches jobs to **GitHub Actions**, where `anthropics/claude-code-action` runs Claude Code. State lives in **Redis** (Railway TCP or Upstash REST).
 
 ### Non-goals (v1)
 
@@ -29,13 +29,13 @@ flowchart LR
         CB["POST /runner/callback"]
         CTX["GET /runner/context/:sessionId"]
         OA["GET /oauth/*"]
-        KV[(Upstash Redis)]
+        KV[(Redis)]
     end
 
     subgraph GitHub["GitHub"]
-        GA["GitHub App: heimdall"]
+        GA["GitHub App: heimdall-bridge"]
         RD["repository_dispatch: heimdall"]
-        WF["heimdall-runner.yml<br/>claude-code-action@v1"]
+        WF["runner.yml<br/>claude-code-base-action (pinned)"]
         PR[Pull Request]
     end
 
@@ -150,10 +150,10 @@ Reusable workflow steps:
 1. **Callback `started`** → Gateway posts a `thought` ("picked up by GitHub Actions run …").
 2. Checkout default branch; create or check out `client_payload.branch` (follow-ups reuse it).
 3. **Fetch context**: `GET {callback_url}/context/{session_id}` (auth header, §4.4) → returns the assembled prompt (Linear `promptContext`, thread history, and for `prompted` runs the diff summary of the existing branch).
-4. Run `anthropics/claude-code-action@v1` (**pin an exact version** — the OAuth-token phase bug #676 makes floating tags risky):
+4. Run `anthropics/claude-code-base-action` (**pin an exact v0.0.x release — there is no v1 tag**; the OAuth-token phase bug #676 makes floating tags risky):
 
 ```yaml
-- uses: anthropics/claude-code-action@v1.x.y
+- uses: anthropics/claude-code-base-action@v0.0.63
   with:
     prompt: ${{ steps.context.outputs.prompt }}
     claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }} # personal (Max, via `claude setup-token`)
