@@ -213,6 +213,8 @@ sequenceDiagram
 
 Same pipeline with `kind: "prompted"`: Gateway looks up the session record in Redis (`repo`, `branch`, `pr_url`), dispatches again; the runner checks out the **existing branch**, the context endpoint prepends the conversation so far + `git diff main...branch` summary + the new user message; the run pushes to the same branch so the existing PR updates. Terminal activity: `response` ("Updated the PR: …").
 
+When the session has a `pr_url`, the context endpoint also folds **human review feedback from the PR** into the prompt (review summaries, inline comments with file:line, conversation comments) fetched with the App installation token — so "@heimdall address the review comments" works without pasting them into Linear. Bot comments are dropped, bodies capped; feedback is an enrichment and never fails the run (fetch errors are logged and skipped). It is user input under the same untrusted-instruction rules as issue text.
+
 If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL expiry), emit an `error` activity asking the user to start a fresh mention.
 
 ### 5.3 Failure & stop

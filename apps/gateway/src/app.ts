@@ -212,7 +212,17 @@ export function createApp(deps: Deps): Hono {
       store.getContext(sessionId),
       store.getHistory(sessionId),
     ]);
-    return c.text(buildPrompt(record, context, history));
+    let prFeedback: Awaited<ReturnType<Deps['prFeedback']>> = [];
+    if (record.prUrl) {
+      try {
+        const token = await deps.github.tokenFor(record.repo);
+        prFeedback = await deps.prFeedback(token, record.prUrl);
+      } catch (err) {
+        // Feedback is an enrichment — never fail the run over it.
+        log('warn', 'could not fetch PR feedback', { sessionId, error: String(err) });
+      }
+    }
+    return c.text(buildPrompt(record, context, history, prFeedback));
   });
 
   app.route('/runner', runner);

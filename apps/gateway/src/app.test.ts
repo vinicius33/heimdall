@@ -86,6 +86,7 @@ function makeHarness(overrides: Partial<Deps> = {}) {
     github: { tokenFor: jest.fn(async () => 'gh-token') },
     dispatch,
     cancelRun,
+    prFeedback: jest.fn(async () => []),
     background: (task) => {
       background.push(task());
     },
@@ -321,6 +322,40 @@ describe('/runner endpoints', () => {
     const record = await store.getSession('sess-1');
     expect(record?.prUrl).toBe('https://github.com/acme/backend/pull/99');
     expect(record?.status).toBe('completed');
+  });
+
+  it('folds PR review feedback into follow-up prompts when the session has a PR', async () => {
+    const prFeedback = jest.fn(async () => [
+      { author: 'felipe', body: 'Please split this function.', state: 'changes_requested' },
+      { author: 'felipe', body: 'Typo here.', path: 'src/a.ts', line: 12 },
+    ]);
+    const { app, store } = makeHarness({ prFeedback });
+    await seedSession(store);
+    const record = await store.getSession('sess-1');
+    record!.prUrl = 'https://github.com/acme/backend/pull/9';
+    await store.putSession('sess-1', record!);
+
+    const res = await app.request('/runner/context/sess-1', { headers: authHeaders });
+    const prompt = await res.text();
+    expect(prFeedback).toHaveBeenCalledWith('gh-token', 'https://github.com/acme/backend/pull/9');
+    expect(prompt).toContain('Review feedback on the open pull request');
+    expect(prompt).toContain('**felipe** (changes_requested)');
+    expect(prompt).toContain('`src/a.ts`:12');
+  });
+
+  it('serves the context even when PR feedback fetching fails', async () => {
+    const prFeedback = jest.fn(async () => {
+      throw new Error('github down');
+    });
+    const { app, store } = makeHarness({ prFeedback });
+    await seedSession(store);
+    const record = await store.getSession('sess-1');
+    record!.prUrl = 'https://github.com/acme/backend/pull/9';
+    await store.putSession('sess-1', record!);
+
+    const res = await app.request('/runner/context/sess-1', { headers: authHeaders });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('ENG-42');
   });
 
   it('serves the assembled prompt with issue context and history', async () => {

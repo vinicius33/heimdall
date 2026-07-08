@@ -4,9 +4,11 @@ import {
   appAuth,
   cancelWorkflowRun,
   dispatchHeimdall,
+  fetchPrFeedback,
   patAuth,
   type DispatchResult,
   type GitHubAuth,
+  type PrFeedbackItem,
 } from '@heimdall/github';
 import { LinearClient, refreshAccessToken, type LinearGraphQL } from '@heimdall/linear';
 import { log } from './log';
@@ -68,6 +70,8 @@ export interface Deps {
     clientPayload: Record<string, string>;
   }): Promise<DispatchResult>;
   cancelRun(token: string, repo: string, runId: number): Promise<void>;
+  /** Human review feedback on the session's PR, folded into follow-up prompts. */
+  prFeedback(token: string, prUrl: string): Promise<PrFeedbackItem[]>;
   /**
    * Run work after the webhook response is sent. The webhook handler must
    * return fast (5s Linear limit); everything slow goes through here.
@@ -90,6 +94,7 @@ export function makeDeps(config: Config, store: Store): Deps {
     github,
     dispatch: dispatchHeimdall,
     cancelRun: cancelWorkflowRun,
+    prFeedback: fetchPrFeedback,
     background(task) {
       void task().catch((err) => log('error', 'background task failed', { error: String(err) }));
     },
