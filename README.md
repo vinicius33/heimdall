@@ -71,13 +71,16 @@ Compose points the gateway at the bundled Redis automatically, so you can leave 
 
 ### Prebuilt image
 
-Images are published to GHCR from `main` and release tags:
+Images are published to GHCR from `main` and release tags — no clone needed:
 
 ```sh
-docker run --env-file .env -p 3000:3000 ghcr.io/vinicius33/heimdall:latest
+curl -fsSLO https://raw.githubusercontent.com/vinicius33/heimdall/main/.env.example
+cp .env.example .env   # fill in your Linear/GitHub credentials
+
+docker run -d --env-file .env -p 3000:3000 ghcr.io/vinicius33/heimdall:latest
 ```
 
-Bring your own Redis via `REDIS_URL` (or Upstash REST via `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`).
+Bring your own Redis via `REDIS_URL` (or Upstash REST via `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`). The image is stateless: env vars in, `GET /healthz` out.
 
 ### From source
 
