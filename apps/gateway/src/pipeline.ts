@@ -71,6 +71,12 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
       log('warn', 'could not move issue to started state', { error: String(err) }),
     );
 
+    // A fresh mention on an issue Heimdall already worked on starts a NEW
+    // Linear session; inherit the PR from the previous session so follow-up
+    // features (PR review feedback in the prompt) keep working.
+    const previousSessionId = await deps.store.sessionIdForIssue(issue.id);
+    const previous = previousSessionId ? await deps.store.getSession(previousSessionId) : null;
+
     const record: SessionRecord = {
       issueId: issue.id,
       issueIdentifier: issue.identifier,
@@ -79,6 +85,7 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
       organizationId: event.organizationId,
       repo,
       branch: issue.branchName,
+      prUrl: previous?.repo === repo ? previous.prUrl : undefined,
       status: 'dispatched',
       updatedAt: new Date().toISOString(),
     };

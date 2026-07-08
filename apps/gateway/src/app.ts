@@ -217,6 +217,11 @@ export function createApp(deps: Deps): Hono {
       try {
         const token = await deps.github.tokenFor(record.repo);
         prFeedback = await deps.prFeedback(token, record.prUrl);
+        log('info', 'pr feedback included in context', {
+          sessionId,
+          prUrl: record.prUrl,
+          items: prFeedback.length,
+        });
       } catch (err) {
         // Feedback is an enrichment — never fail the run over it.
         log('warn', 'could not fetch PR feedback', { sessionId, error: String(err) });

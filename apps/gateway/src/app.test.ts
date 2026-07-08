@@ -168,6 +168,34 @@ describe('POST /webhooks/linear', () => {
     expect(calls.some((call) => call.query.includes('agentSessionUpdate'))).toBe(true);
   });
 
+  it('inherits the PR from a previous session when a fresh mention starts a new session', async () => {
+    const { app, store, flush } = makeHarness();
+    await store.putSession('sess-0', {
+      issueId: 'issue-uuid',
+      issueIdentifier: 'ENG-42',
+      issueTitle: 'Login broken',
+      issueUrl: 'https://linear.app/acme/issue/ENG-42',
+      organizationId: 'org-1',
+      repo: 'acme/backend',
+      branch: 'heimdall/eng-42-login-broken',
+      prUrl: 'https://github.com/acme/backend/pull/9',
+      status: 'completed',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const { body, signature } = signedWebhook(createdEvent); // new session sess-1, same issue
+    await app.request('/webhooks/linear', {
+      method: 'POST',
+      body,
+      headers: { 'linear-signature': signature },
+    });
+    await flush();
+
+    expect((await store.getSession('sess-1'))?.prUrl).toBe(
+      'https://github.com/acme/backend/pull/9',
+    );
+  });
+
   it('routes created events from an unmapped workspace via the catch-all table', async () => {
     const { app, dispatch, flush } = makeHarness();
     const { body, signature } = signedWebhook({ ...createdEvent, organizationId: 'org-unknown' });
