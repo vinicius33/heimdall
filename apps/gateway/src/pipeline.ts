@@ -28,6 +28,21 @@ async function reportError(
   }).catch((err) => log('error', 'failed to report error activity', { error: String(err) }));
 }
 
+function routeErrorMessage(
+  resolution: Extract<ReturnType<typeof resolveRepo>, { repo: undefined }>,
+  event: AgentSessionEventPayload,
+  teamKey: string,
+): string {
+  switch (resolution.reason) {
+    case 'no_workspace_routes':
+      return `No routes configured for this workspace (id \`${event.organizationId}\`). Add it to \`HEIMDALL_ROUTES\`.`;
+    case 'override_not_allowed':
+      return `The \`[repo=${resolution.override}]\` override is not allowed here: overrides must target a GitHub owner already present in this workspace's routes.`;
+    case 'no_team_route':
+      return `No repository mapped for team \`${teamKey}\`. Add it to \`HEIMDALL_ROUTES\` or put \`[repo=owner/name]\` in the issue description.`;
+  }
+}
+
 /** created → resolve repo, mark started, persist session, dispatch, link run. SPEC §5.1. */
 export async function processCreated(deps: Deps, event: AgentSessionEventPayload): Promise<void> {
   const sessionId = event.agentSession.id;
@@ -40,19 +55,17 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
     }
     const issue = await fetchIssue(client, issueRef.id);
 
-    const repo = resolveRepo({
+    const resolution = resolveRepo({
       routes: deps.config.HEIMDALL_ROUTES,
+      organizationId: event.organizationId,
       teamKey: issue.team.key,
       issueDescription: issue.description,
     });
-    if (!repo) {
-      await reportError(
-        client,
-        sessionId,
-        `No repository mapped for team \`${issue.team.key}\`. Add it to \`HEIMDALL_ROUTES\` or put \`[repo=owner/name]\` in the issue description.`,
-      );
+    if (resolution.repo === undefined) {
+      await reportError(client, sessionId, routeErrorMessage(resolution, event, issue.team.key));
       return;
     }
+    const repo = resolution.repo;
 
     await moveIssueToStarted(client, issue.id).catch((err) =>
       log('warn', 'could not move issue to started state', { error: String(err) }),

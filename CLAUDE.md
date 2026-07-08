@@ -12,6 +12,7 @@ npm-workspaces monorepo: `apps/gateway` (Hono service), `packages/linear` (Graph
 
 - TypeScript strict, no `any`; Node 20+; 2-space indent, 100-char lines.
 - Jest for unit tests; ESLint + Prettier (`npx tsc --noEmit`, `npx eslint .`, `npx jest` before committing).
+- **Every new feature or behavior change ships with tests covering at least its critical path** (happy path + the failure modes users will hit). Pure logic → unit tests in the owning package; gateway behavior → webhook-level tests through the harness in `apps/gateway/src/app.test.ts`.
 - Conventional Commits (`feat:`, `fix:`, `docs:`…), feature branches off `main`.
 
 ## Hard constraints (violating these breaks the product)

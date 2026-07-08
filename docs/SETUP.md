@@ -40,7 +40,7 @@ It goes in **two places**: the gateway env (Railway) and each target repo's Acti
 2. Service settings: build command `npm ci && npm run build`, start command `npm start`.
 3. **Settings → Networking → Generate Domain** → the `https://….up.railway.app` URL is `PUBLIC_URL` (no trailing slash).
 4. **Variables** tab: set everything from `.env.example` — you now have all of them except the Linear trio (next step); add those after step 5 and redeploy.
-5. `HEIMDALL_ROUTES`: you author it. Keys are Linear **team keys** — the prefix in issue identifiers (`ENG-42` → `ENG`), visible in Linear team settings. `"*"` is the catch-all. Example: `{"ENG":"acme/backend","*":"vinicius33/heimdall-sandbox"}`.
+5. `HEIMDALL_ROUTES`: you author it. Keys are Linear **team keys** — the prefix in issue identifiers (`ENG-42` → `ENG`), visible in Linear team settings. `"*"` is the catch-all. Example: `{"ENG":"acme/backend","*":"vinicius33/heimdall-sandbox"}`. Serving more than one Linear workspace? Nest tables under **workspace ids** (shown on the OAuth install page, step 6): `{"<org id>":{"ENG":"acme/backend"},"*":{"*":"vinicius33/heimdall-sandbox"}}` — `"*"` is the catch-all workspace, and `[repo=…]` overrides only work toward GitHub owners already routed in that workspace.
 
 ## 5. Linear OAuth app → `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`
 
@@ -53,7 +53,7 @@ It goes in **two places**: the gateway env (Railway) and each target repo's Acti
 
 ## 6. Install Heimdall into the workspace
 
-Visit `<PUBLIC_URL>/oauth/authorize` in your browser **as a workspace admin** and approve. This runs the `actor=app` flow, creates the `@heimdall` app user, and stores the workspace token in Redis. Repeat per workspace (company + personal).
+Visit `<PUBLIC_URL>/oauth/authorize` in your browser **as a workspace admin** and approve. This runs the `actor=app` flow, creates the `@heimdall` app user, and stores the workspace token in Redis. Repeat per workspace (company + personal) — installing in a workspace other than the app's home workspace requires the Linear OAuth app to be set to **Public**. The success page prints the workspace's **organization id**; use it as the key for that workspace's table in `HEIMDALL_ROUTES` (step 4.5).
 
 ## 7. Claude auth → target-repo Actions secrets
 

@@ -64,9 +64,14 @@ export function createApp(deps: Deps): Hono {
     });
     const workspace = await fetchWorkspace(new LinearClient(accessToken));
     await store.setWorkspaceToken(workspace.organizationId, accessToken);
-    log('info', 'workspace installed', { organization: workspace.organizationName });
+    log('info', 'workspace installed', {
+      organization: workspace.organizationName,
+      organizationId: workspace.organizationId,
+    });
     return c.text(
-      `Heimdall installed for workspace "${workspace.organizationName}". You can close this tab.`,
+      `Heimdall installed for workspace "${workspace.organizationName}".\n` +
+        `Workspace id (key for per-workspace HEIMDALL_ROUTES): ${workspace.organizationId}\n` +
+        `You can close this tab.`,
     );
   });
 

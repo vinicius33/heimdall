@@ -216,7 +216,7 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 
 ### 5.3 Failure & stop
 
-- Dispatch fails / route unresolved → immediate `error` activity ("no repo mapped for team X — add it to HEIMDALL_ROUTES or use [repo=owner/name]").
+- Dispatch fails / route unresolved → immediate `error` activity ("no repo mapped for team X — add it to HEIMDALL_ROUTES or use [repo=owner/name]"; unmapped workspace and rejected `[repo=…]` override get their own messages).
 - Workflow fails → `failed` callback → `error` activity with log tail + run URL.
 - **User stop**: a `prompted` webhook whose `agentActivity.signal == "stop"` is the canonical cancel — Gateway cancels the run (`POST /repos/{o}/{r}/actions/runs/{id}/cancel`) and emits an `error` activity (there is no agent-side cancel mutation; session status is inferred from activities).
 - `issueUnassignedFromYou` inbox notification → same cancel path, final `thought` ("Stopped by unassignment").
@@ -232,7 +232,7 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 | `LINEAR_WEBHOOK_SECRET`                                                  | HMAC verification                                                                                                                                                                                        |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_PAT`)             | dispatch auth                                                                                                                                                                                            |
 | `HEIMDALL_CALLBACK_SECRET`                                               | runner ↔ gateway auth                                                                                                                                                                                    |
-| `HEIMDALL_ROUTES`                                                        | JSON: `{"ENG":"acme/backend","PLAY":"viniciussouza/playground","*":"vinicius33/heimdall-sandbox"}` — Linear **team key** → repo; `*` = catch-all; `[repo=owner/name]` in the issue description overrides |
+| `HEIMDALL_ROUTES`                                                        | JSON, two shapes. Flat (single workspace): `{"ENG":"acme/backend","*":"vinicius33/heimdall-sandbox"}` — Linear **team key** → repo, `*` = catch-all team. Nested (per workspace): `{"<linear org id>":{"ENG":"acme/backend"},"*":{"*":"vinicius33/heimdall-sandbox"}}` — Linear **organizationId** → team table, `*` = catch-all workspace (flat normalizes to it; the org id is shown on the OAuth install success page). `[repo=owner/name]` in the issue description overrides, but only toward GitHub owners already present in that workspace's table (tenancy guard) |
 | `REDIS_URL` **or** `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | KV — plain TCP Redis (Railway one-click) or Upstash REST; both implement the gateway `KV` interface                                                                                                      |
 
 ### 6.2 Redis keys

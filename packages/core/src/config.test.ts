@@ -16,8 +16,34 @@ describe('loadConfig', () => {
   it('parses a valid environment and normalizes PUBLIC_URL', () => {
     const config = loadConfig(validEnv);
     expect(config.PUBLIC_URL).toBe('https://heimdall.example.com');
-    expect(config.HEIMDALL_ROUTES).toEqual({ ENG: 'acme/backend', '*': 'vinicius/sandbox' });
     expect(config.PORT).toBe(3000);
+  });
+
+  it('normalizes flat HEIMDALL_ROUTES to the catch-all workspace', () => {
+    const config = loadConfig(validEnv);
+    expect(config.HEIMDALL_ROUTES).toEqual({
+      '*': { ENG: 'acme/backend', '*': 'vinicius/sandbox' },
+    });
+  });
+
+  it('parses nested per-workspace HEIMDALL_ROUTES', () => {
+    const config = loadConfig({
+      ...validEnv,
+      HEIMDALL_ROUTES: '{"org-uuid":{"ENG":"acme/backend"},"*":{"*":"vinicius/sandbox"}}',
+    });
+    expect(config.HEIMDALL_ROUTES).toEqual({
+      'org-uuid': { ENG: 'acme/backend' },
+      '*': { '*': 'vinicius/sandbox' },
+    });
+  });
+
+  it('rejects HEIMDALL_ROUTES mixing flat and nested entries', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnv,
+        HEIMDALL_ROUTES: '{"ENG":"acme/backend","org-uuid":{"ENG":"acme/backend"}}',
+      }),
+    ).toThrow(/HEIMDALL_ROUTES/);
   });
 
   it('unescapes newlines in the GitHub App private key', () => {

@@ -1,7 +1,27 @@
 import { z } from 'zod';
+import type { WorkspaceRoutes } from './routes';
 
 const repoRe = /^[\w.-]+\/[\w.-]+$/;
-const routesSchema = z.record(z.string().regex(repoRe, 'expected "owner/repo"'));
+const tableSchema = z.record(z.string().regex(repoRe, 'expected "owner/repo"'));
+const workspaceRoutesSchema = z.record(tableSchema);
+
+/**
+ * HEIMDALL_ROUTES accepts two shapes:
+ * - flat (single workspace):   {"ENG":"acme/backend","*":"acme/sandbox"}
+ * - nested (per workspace):    {"<linear org id>":{"ENG":"acme/backend"},"*":{...}}
+ * Flat is normalized to `{"*": table}`. Mixed shapes are rejected.
+ */
+function parseRoutes(raw: string): WorkspaceRoutes {
+  const json: unknown = JSON.parse(raw);
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) {
+    throw new Error('expected a JSON object');
+  }
+  const values = Object.values(json);
+  const objects = values.filter((v) => typeof v === 'object' && v !== null).length;
+  if (objects === values.length && values.length > 0) return workspaceRoutesSchema.parse(json);
+  if (objects === 0) return { '*': tableSchema.parse(json) };
+  throw new Error('mix of flat ("TEAM":"owner/repo") and nested (workspace id -> table) entries');
+}
 
 const envSchema = z
   .object({
@@ -22,7 +42,7 @@ const envSchema = z
     HEIMDALL_CALLBACK_SECRET: z.string().min(16, 'use a long random secret'),
     HEIMDALL_ROUTES: z.string().transform((raw, ctx) => {
       try {
-        return routesSchema.parse(JSON.parse(raw));
+        return parseRoutes(raw);
       } catch (err) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

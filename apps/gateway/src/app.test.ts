@@ -18,7 +18,10 @@ const config = {
   LINEAR_WEBHOOK_SECRET: WEBHOOK_SECRET,
   GITHUB_PAT: 'ghp_test',
   HEIMDALL_CALLBACK_SECRET: CALLBACK_SECRET,
-  HEIMDALL_ROUTES: { ENG: 'acme/backend', '*': 'vinicius/sandbox' },
+  HEIMDALL_ROUTES: {
+    'org-1': { ENG: 'acme/backend', '*': 'acme/sandbox' },
+    '*': { '*': 'vinicius/sandbox' },
+  },
   UPSTASH_REDIS_REST_URL: 'https://kv.test',
   UPSTASH_REDIS_REST_TOKEN: 'tok',
 } as unknown as Config;
@@ -162,6 +165,54 @@ describe('POST /webhooks/linear', () => {
     });
     // external URL linked on the session
     expect(calls.some((call) => call.query.includes('agentSessionUpdate'))).toBe(true);
+  });
+
+  it('routes created events from an unmapped workspace via the catch-all table', async () => {
+    const { app, dispatch, flush } = makeHarness();
+    const { body, signature } = signedWebhook({ ...createdEvent, organizationId: 'org-unknown' });
+    await app.request('/webhooks/linear', {
+      method: 'POST',
+      body,
+      headers: { 'linear-signature': signature },
+    });
+    await flush();
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ repo: 'vinicius/sandbox' }));
+  });
+
+  it('rejects a cross-workspace [repo=...] override with an error activity', async () => {
+    const calls: GraphQLCall[] = [];
+    const withOverride = fakeLinear(calls);
+    const graphqlSpy = withOverride.graphql.bind(withOverride);
+    const { app, dispatch, flush } = makeHarness({
+      linearFor: async () => ({
+        async graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+          if (query.includes('HeimdallIssue')) {
+            calls.push({ query, variables });
+            return {
+              issue: {
+                id: 'issue-uuid',
+                identifier: 'ENG-42',
+                title: 'Login broken',
+                description: 'Steal this\n\n[repo=vinicius/secrets]',
+                branchName: 'heimdall/eng-42-login-broken',
+                url: 'https://linear.app/acme/issue/ENG-42',
+                team: { id: 'team-1', key: 'ENG' },
+              },
+            } as T;
+          }
+          return graphqlSpy<T>(query, variables);
+        },
+      }),
+    });
+    const { body, signature } = signedWebhook(createdEvent);
+    await app.request('/webhooks/linear', {
+      method: 'POST',
+      body,
+      headers: { 'linear-signature': signature },
+    });
+    await flush();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(JSON.stringify(calls)).toContain('override is not allowed');
   });
 
   it('handles prompted with signal=stop: cancels the run and reports user_stopped', async () => {
