@@ -16,9 +16,43 @@ export function buildAuthorizeUrl(opts: {
     response_type: 'code',
     scope: AGENT_SCOPES,
     actor: 'app',
+    // Without this, Linear short-circuits already-authorized apps with an
+    // "already installed" page and never redirects back with a code — making
+    // re-installs (e.g. after a token dies) impossible.
+    prompt: 'consent',
     state: opts.state,
   });
   return `${AUTHORIZE_URL}?${params.toString()}`;
+}
+
+export interface TokenSet {
+  accessToken: string;
+  /** Present when the OAuth app has token expiry enabled; rotates on refresh. */
+  refreshToken?: string;
+  /** Seconds until the access token expires; absent = non-expiring. */
+  expiresIn?: number;
+}
+
+async function requestToken(body: URLSearchParams, what: string): Promise<TokenSet> {
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  if (!res.ok) {
+    throw new Error(`Linear ${what} failed: HTTP ${res.status} ${await res.text()}`);
+  }
+  const json = (await res.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+  if (!json.access_token) throw new Error(`Linear ${what} returned no access_token`);
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    expiresIn: json.expires_in,
+  };
 }
 
 export async function exchangeCode(opts: {
@@ -26,24 +60,33 @@ export async function exchangeCode(opts: {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
-}): Promise<{ accessToken: string }> {
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
+}): Promise<TokenSet> {
+  return requestToken(
+    new URLSearchParams({
       grant_type: 'authorization_code',
       code: opts.code,
       client_id: opts.clientId,
       client_secret: opts.clientSecret,
       redirect_uri: opts.redirectUri,
     }),
-  });
-  if (!res.ok) {
-    throw new Error(`Linear token exchange failed: HTTP ${res.status} ${await res.text()}`);
-  }
-  const json = (await res.json()) as { access_token?: string };
-  if (!json.access_token) throw new Error('Linear token exchange returned no access_token');
-  return { accessToken: json.access_token };
+    'token exchange',
+  );
+}
+
+export async function refreshAccessToken(opts: {
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+}): Promise<TokenSet> {
+  return requestToken(
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: opts.refreshToken,
+      client_id: opts.clientId,
+      client_secret: opts.clientSecret,
+    }),
+    'token refresh',
+  );
 }
 
 export interface WorkspaceIdentity {

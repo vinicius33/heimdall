@@ -4,15 +4,34 @@ import type { KV } from './kv';
 const SESSION_TTL_S = 14 * 24 * 3600; // SPEC §6.2
 const OAUTH_STATE_TTL_S = 600;
 
+export interface WorkspaceAuth {
+  accessToken: string;
+  /** Present when Linear issued an expiring token; rotates on refresh. */
+  refreshToken?: string;
+  /** Epoch ms; absent = non-expiring token. */
+  expiresAt?: number;
+}
+
 export class Store {
   constructor(private readonly kv: KV) {}
 
-  async getWorkspaceToken(organizationId: string): Promise<string | null> {
-    return this.kv.get(`ws:${organizationId}:token`);
+  async getWorkspaceAuth(organizationId: string): Promise<WorkspaceAuth | null> {
+    const raw = await this.kv.get(`ws:${organizationId}:token`);
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+      try {
+        return JSON.parse(raw) as WorkspaceAuth;
+      } catch {
+        // fall through — a bare token that happens to start with "{" is impossible,
+        // but never let a corrupt record crash webhook handling
+      }
+    }
+    // Legacy shape: a bare access token string from before refresh support.
+    return { accessToken: raw };
   }
 
-  async setWorkspaceToken(organizationId: string, token: string): Promise<void> {
-    await this.kv.set(`ws:${organizationId}:token`, token);
+  async setWorkspaceAuth(organizationId: string, auth: WorkspaceAuth): Promise<void> {
+    await this.kv.set(`ws:${organizationId}:token`, JSON.stringify(auth));
   }
 
   async getSession(sessionId: string): Promise<SessionRecord | null> {

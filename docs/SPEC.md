@@ -74,10 +74,11 @@ Docs: <https://linear.app/developers/agents>, <https://linear.app/developers/age
 
 ```
 https://linear.app/oauth/authorize?client_id=...&redirect_uri=<GATEWAY>/oauth/callback
-  &response_type=code&scope=read,write,app:assignable,app:mentionable&actor=app
+  &response_type=code&scope=read,write,app:assignable,app:mentionable&actor=app&prompt=consent
 ```
 
-- Gateway `GET /oauth/callback` exchanges the code, queries `viewer { id organization { id } }`, stores the token in Redis keyed by workspace/org id.
+- `prompt=consent` is required: without it Linear short-circuits already-authorized apps with an "already installed" page and never redirects back with a code, making re-installs (dead token recovery) impossible.
+- Gateway `GET /oauth/callback` exchanges the code and stores the **full token set** (`access_token`, `refresh_token`, `expires_at`) in Redis keyed by workspace/org id. Linear access tokens expire (~24h); `linearFor` refreshes proactively 5 min before expiry and persists the rotated set. A failed refresh surfaces as `workspace_not_installed` → reinstall via `/oauth/authorize`. Legacy bare-token records are read transparently.
 - Enable webhook categories in the app config: **Agent session events** (required), **Inbox notifications** and **Permission changes** (recommended).
 
 ### 3.2 Webhook contract — `POST /webhooks/linear`

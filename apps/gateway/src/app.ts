@@ -56,14 +56,18 @@ export function createApp(deps: Deps): Hono {
     if (!code || !state || !(await store.consumeOauthState(state))) {
       return c.text('invalid OAuth state or missing code', 400);
     }
-    const { accessToken } = await exchangeCode({
+    const tokens = await exchangeCode({
       code,
       clientId: config.LINEAR_CLIENT_ID,
       clientSecret: config.LINEAR_CLIENT_SECRET,
       redirectUri: `${config.PUBLIC_URL}/oauth/callback`,
     });
-    const workspace = await fetchWorkspace(new LinearClient(accessToken));
-    await store.setWorkspaceToken(workspace.organizationId, accessToken);
+    const workspace = await fetchWorkspace(new LinearClient(tokens.accessToken));
+    await store.setWorkspaceAuth(workspace.organizationId, {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresIn ? Date.now() + tokens.expiresIn * 1000 : undefined,
+    });
     log('info', 'workspace installed', {
       organization: workspace.organizationName,
       organizationId: workspace.organizationId,
