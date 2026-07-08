@@ -51,10 +51,10 @@ flowchart LR
     OA -- "actor=app install" --> Linear
 ```
 
-- **First response in seconds** — the gateway acks the session and posts a thought before any GitHub call.
-- **Repo routing** — map Linear team keys to repos with `HEIMDALL_ROUTES`; serve multiple Linear workspaces from one deployment with per-workspace tables; override per issue with `[repo=owner/name]` in the description.
-- **Follow-ups** — reply on the issue and the same branch/PR is updated with full conversation context; press stop (or unassign) to cancel the run.
-- **Self-healing auth** — Linear OAuth tokens are refreshed automatically before expiry.
+- **First response in seconds:** the gateway acks the session and posts a thought before any GitHub call.
+- **Repo routing:** map Linear team keys to repos with `HEIMDALL_ROUTES`; serve multiple Linear workspaces from one deployment with per-workspace tables; override per issue with `[repo=owner/name]` in the description.
+- **Follow-ups:** reply on the issue and the same branch/PR is updated with full conversation context; press stop (or unassign) to cancel the run.
+- **Self-healing auth:** Linear OAuth tokens are refreshed automatically before expiry.
 
 ## Running the gateway
 
@@ -71,7 +71,7 @@ Compose points the gateway at the bundled Redis automatically, so you can leave 
 
 ### Prebuilt image
 
-Images are published to GHCR from `main` and release tags — no clone needed:
+Images are published to GHCR from `main` and release tags, no clone needed:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/vinicius33/heimdall/main/.env.example
@@ -99,7 +99,7 @@ Heimdall needs a Linear OAuth app (the agent), a GitHub App (dispatch + PRs), an
 Per target repo, it boils down to:
 
 1. Copy [`stubs/heimdall.yml`](stubs/heimdall.yml) to `.github/workflows/heimdall.yml`.
-2. Add Actions secrets: `HEIMDALL_CALLBACK_SECRET` and one of `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (Claude usage bills to whoever owns the key — set it org-wide to onboard a whole org at once).
+2. Add Actions secrets: `HEIMDALL_CALLBACK_SECRET` and one of `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (Claude usage bills to whoever owns the key; set it org-wide to onboard a whole org at once).
 3. Enable "Allow GitHub Actions to create and approve pull requests" and install the GitHub App on the repo.
 
 ## Development
@@ -110,7 +110,7 @@ npm run typecheck  # tsc -b
 npm run lint       # eslint
 ```
 
-Every feature ships with tests for its critical path — see [CLAUDE.md](CLAUDE.md) for the working conventions.
+Every feature ships with tests for its critical path; see [CLAUDE.md](CLAUDE.md) for the working conventions.
 
 ## License
 
