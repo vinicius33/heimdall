@@ -41,6 +41,7 @@ It goes in **two places**: the gateway env (Railway) and each target repo's Acti
 3. **Settings → Networking → Generate Domain** → the `https://….up.railway.app` URL is `PUBLIC_URL` (no trailing slash).
 4. **Variables** tab: set everything from `.env.example` — you now have all of them except the Linear trio (next step); add those after step 5 and redeploy.
 5. `HEIMDALL_ROUTES`: you author it. Keys are Linear **team keys** — the prefix in issue identifiers (`ENG-42` → `ENG`), visible in Linear team settings. `"*"` is the catch-all. Example: `{"ENG":"acme/backend","*":"vinicius33/heimdall-sandbox"}`. Serving more than one Linear workspace? Nest tables under **workspace ids** (shown on the OAuth install page, step 6): `{"<org id>":{"ENG":"acme/backend"},"*":{"*":"vinicius33/heimdall-sandbox"}}` — `"*"` is the catch-all workspace, and `[repo=…]` overrides only work toward GitHub owners already routed in that workspace.
+6. **One board, many repos?** The route table is only the default. Put `[repo=owner/name]` anywhere in an issue's description (Cyrus-style) and Heimdall dispatches that issue there instead — e.g. a ticket on the `ENG` board with `[repo=acme/frontend]` in its description goes to `acme/frontend`, not `acme/backend`. The override must target a GitHub owner already present in that workspace's routes (tenancy guard), and the GitHub App must be installed on the repo.
 
 ## 5. Linear OAuth app → `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`
 
