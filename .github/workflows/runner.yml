@@ -71,11 +71,11 @@ jobs:
         env:
           BRANCH: ${{ steps.p.outputs.branch }}
         run: |
-          # Identity of OUR GitHub App's bot user (heimdallz — "heimdall" is a
-          # different app owned by someone else). The id+slug email format is
-          # what makes GitHub attribute commits/co-authorship to the right bot.
-          git config user.name "heimdallz[bot]"
-          git config user.email "300811537+heimdallz[bot]@users.noreply.github.com"
+          # Identity of OUR GitHub App's bot user (heimdall-bridge — "heimdall"
+          # is a different app owned by someone else). The id+slug email format
+          # is what makes GitHub attribute commits/co-authorship to the right bot.
+          git config user.name "heimdall-bridge[bot]"
+          git config user.email "300811537+heimdall-bridge[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
             git fetch origin "$BRANCH"
             git checkout "$BRANCH"
