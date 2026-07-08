@@ -50,6 +50,17 @@ describe('loadConfig', () => {
     expect(config.REDIS_URL).toBe('redis://default:pw@redis.railway.internal:6379');
   });
 
+  it('treats empty-string env vars as unset (blank .env template lines)', () => {
+    const config = loadConfig({
+      ...validEnv,
+      GITHUB_APP_ID: '',
+      GITHUB_APP_PRIVATE_KEY: '',
+      REDIS_URL: '',
+    });
+    expect(config.GITHUB_APP_ID).toBeUndefined();
+    expect(config.REDIS_URL).toBeUndefined();
+  });
+
   it('rejects when no Redis config is present at all', () => {
     expect(() =>
       loadConfig({

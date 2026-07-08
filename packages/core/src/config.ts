@@ -45,5 +45,8 @@ const envSchema = z
 export type Config = z.infer<typeof envSchema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
-  return envSchema.parse(env);
+  // Treat empty strings as unset: .env files (and docker compose env_file)
+  // pass blank template lines like `UPSTASH_REDIS_REST_URL=` through as "".
+  const present = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== '' && v != null));
+  return envSchema.parse(present);
 }

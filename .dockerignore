@@ -1,0 +1,16 @@
+node_modules
+**/dist
+**/*.tsbuildinfo
+**/*.test.ts
+coverage
+.env
+.env.*
+.git
+.github
+.claude
+docs
+stubs
+**/*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
