@@ -174,8 +174,10 @@ Required job permissions: `contents: write`, `pull-requests: write`, `issues: wr
 
 ```jsonc
 { "session_id": "…", "event": "started" | "progress" | "completed" | "failed",
-  "run_url": "…", "pr_url": "…", "message": "…" }  // fields optional per event
+  "run_url": "…", "pr_urls": ["…"], "message": "…" }  // fields optional per event
 ```
+
+`pr_urls` supersedes the original single `pr_url` string; the gateway accepts both (legacy runners in flight during rollout send `pr_url`).
 
 Gateway maps: `started`→`thought` + `agentSessionUpdate.externalUrls += run_url`; `progress`→`action`; `completed`→`response` (includes PR link; move issue is left to Linear/PR automation); `failed`→`error`.
 
@@ -211,9 +213,9 @@ sequenceDiagram
 
 ### 5.2 Follow-up (`prompted`)
 
-Same pipeline with `kind: "prompted"`: Gateway looks up the session record in Redis (`repo`, `branch`, `pr_url`), dispatches again; the runner checks out the **existing branch**, the context endpoint prepends the conversation so far + `git diff main...branch` summary + the new user message; the run pushes to the same branch so the existing PR updates. Terminal activity: `response` ("Updated the PR: …").
+Same pipeline with `kind: "prompted"`: Gateway looks up the session record in Redis (`repo`, `branch`, `prUrls`), dispatches again; the runner checks out the **existing branch**, the context endpoint prepends the conversation so far + `git diff main...branch` summary + the new user message; the run pushes to the same branch so the existing PR updates. Terminal activity: `response` ("Updated the PR: …").
 
-When the session has a `pr_url`, the context endpoint also folds **human review feedback from the PR** into the prompt (review summaries, inline comments with file:line, conversation comments) fetched with the App installation token — so "@heimdall address the review comments" works without pasting them into Linear. Bot comments are dropped, bodies capped; feedback is an enrichment and never fails the run (fetch errors are logged and skipped). It is user input under the same untrusted-instruction rules as issue text.
+When the session has PR URLs recorded, the context endpoint also folds **human review feedback from each PR** into the prompt (review summaries, inline comments with file:line, conversation comments) fetched with the App installation token — so "@heimdall address the review comments" works without pasting them into Linear. Bot comments are dropped, bodies capped; feedback is an enrichment and never fails the run (fetch errors are logged and skipped). It is user input under the same untrusted-instruction rules as issue text.
 
 If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL expiry), emit an `error` activity asking the user to start a fresh mention.
 
@@ -242,8 +244,10 @@ If a `prompted` event arrives for an unknown session (Redis miss — e.g. TTL ex
 
 ```
 ws:{organizationId}:token          → Linear OAuth access token (encrypted at rest is a stretch goal)
-session:{agentSessionId}           → { issueId, repo, branch, runId, prUrl, status, updatedAt }  TTL 14d
+session:{agentSessionId}           → { issueId, repo, submodules?, branch, runId, prUrls, status, updatedAt }  TTL 14d
 ```
+
+`prUrls` is an array (§10); records written before M5 carry a single `prUrl` string — read it as a one-element list (same legacy-shape tolerance as the workspace token records).
 
 ### 6.3 Target repo secrets
 
@@ -255,6 +259,7 @@ session:{agentSessionId}           → { issueId, repo, branch, runId, prUrl, st
 2. **M2 — Dispatch + runner**: GitHub App auth, route resolution, `repository_dispatch`, reusable workflow + stub, claude-code-action run, PR creation. _Verify: mention → PR opens on a sandbox repo._
 3. **M3 — Status reporting**: callback endpoints, context endpoint, milestone→activity mapping, external run URL on session. _Verify: ticket shows thought → actions → response with PR link._
 4. **M4 — Follow-ups + stop**: `prompted` handling (incl. `signal: stop` → cancel run), branch reuse/PR update, unassignment cancel, error paths. _Verify: reply on the session updates the same PR; pressing stop cancels the Actions run._
+5. **M5 — Multi-repo sessions** (§10): scoped runner token endpoint, submodule checkout + per-repo branch prep, multi-push/multi-PR loop with the pointer-bump guard, `pr_urls` callback + multi-PR feedback in follow-ups. _Verify: the full §10.7 matrix — a single-repo session behaves exactly as before, and a meta-repo session yields one PR per dirty child._
 
 ## 8. Risks / gotchas (read before coding)
 
@@ -264,6 +269,8 @@ session:{agentSessionId}           → { issueId, repo, branch, runId, prUrl, st
 - `repository_dispatch` requires the App/PAT token; the default `GITHUB_TOKEN` cannot trigger it.
 - `agentActivityCreate.content` is `JSONObject!` and mostly unvalidated — **except `error.reasonCode`, which IS validated** against a fixed enum (verified live: `noCodeAccess|noGitHubConnection|missingCommitSigningKey|noPolicyRepos|personalAccessDenied|githubTransientError|repoNotInPolicy|requiresGithubConnection`). Omit it unless one fits. Type everything strictly in `packages/linear` per §9.
 - Prompt-injection surface: issue text is untrusted input executed with repo write access. Mitigate with `--allowedTools` (no `WebFetch`/`WebSearch`), review-before-merge (agent never merges), and target-repo choice.
+- **Never PR submodule pointer bumps** (§10.4): child PRs are unmerged when the run ends, and squash-merges rewrite their SHAs — a pointer-bump PR would reference commits that stop existing. Pointer updates stay with the org's existing post-merge process.
+- The `/runner/token` endpoint (§10.2) mints write-capable tokens: always scope to the session's repo set, never return an unscoped installation token.
 
 ## 9. Linear API schemas (verified against `schema.graphql`, July 2026)
 
@@ -298,3 +305,52 @@ Input: `agentSessionId: String!`, `content: JSONObject!`, `ephemeral: Boolean` (
 ### 9.4 Signals (`AgentActivitySignal`)
 
 `auth | continue | select | stop` — carried on activities in both directions. Heimdall must handle **`stop`** on incoming prompts (cancel run, §5.3); `select` pairs with elicitation options; agents may set `signal` on their own activities as an interpretation modifier.
+
+## 10. Multi-repo sessions (git-submodule meta repos) — M5
+
+Some orgs invert the monorepo: a **meta repo** whose git submodules are the actual project repos. Heimdall supports this with **one session → one Actions run (in the meta repo) → one PR per child repo that changed**. Cross-repo tasks ("change the API in service A and its consumer in service B") work because a single Claude run sees everything on disk.
+
+**Design invariant — detection, not modes.** There is no "multi-repo flag" anywhere. The runner behaves according to what the checkout contains: no `.gitmodules` → today's single-repo behavior, bit for bit; submodules present → the same loop runs over more repos. A plain repo is the degenerate case (`repos = [root]`) of every mechanism below. Routing (§6.1), dispatch payload (§4.2), ack deadlines (§3.3), and stop (§5.3 — still exactly one run to cancel) are all untouched.
+
+### 10.1 Onboarding & routing
+
+- Route the Linear team key at the **meta repo** in `HEIMDALL_ROUTES`; `[repo=…]` override works as usual.
+- Only the meta repo gets the stub workflow and Actions secrets. Child repos need **neither** — the run executes in the meta repo.
+- The GitHub App must be installed on the meta repo **and every child repo** it should be able to open PRs on. A submodule outside the installation is checked out read-only (if reachable) and skipped by the push loop with a logged warning surfaced in the completion message.
+
+### 10.2 Scoped runner token — `POST /runner/token`
+
+The run-scoped `github.token` cannot read private sibling repos or push to children, so the gateway mints one:
+
+- Bearer-authenticated with `HEIMDALL_CALLBACK_SECRET` (same trust boundary as `/runner/context`). Body: `{ "session_id": "…" }`.
+- Gateway resolves the session's root repo, reads `.gitmodules` from the session branch (fall back to default branch) via the contents API, resolves each same-host submodule URL (including relative URLs) to `owner/repo`, and persists the list on the session record (`submodules`).
+- Mints an installation token **scoped via the `repositories` parameter to exactly `[root, ...submodules]`** — never the whole installation — and returns `{ token, repos, expires_at }`.
+- Installation tokens live 1 h and the job timeout is 60 min: the runner fetches once before checkout and **again before the push loop**; never reuses a token across those phases.
+- No `.gitmodules` → the response is a token scoped to the root repo only; the runner may skip the fetch entirely in that case (checkout and push already work with `github.token`).
+
+### 10.3 Runner changes (`runner.yml`)
+
+1. **Checkout**: `submodules: recursive`, authenticated for private children via `git config url."https://x-access-token:<token>@github.com/".insteadOf "https://github.com/"` with the §10.2 token. No-op for a repo without submodules.
+2. **Prepare branch**: the existing create-or-checkout logic runs in the root **and in each submodule** (same `issue.branchName` everywhere — it is the cross-repo correlation key). This also un-detaches submodule HEADs so the agent's commits land on the session branch; on follow-ups it recovers prior work by fetching the session branch wherever it exists.
+3. **Push loop** (replaces the single push + PR steps): for the root and each writable submodule — commit leftover changes, and if the session branch has commits over the repo's default branch, push it and `gh pr create --repo <owner/repo>` (or find the existing PR by head branch) using the §10.2 token. Collect the PR URLs.
+4. **Pointer-bump guard**: in the root iteration, gitlink (submodule pointer) diffs are discarded before the commit check — see §10.4. A meta repo whose only "change" is pointer movement counts as unchanged.
+5. **Callbacks**: `completed` sends `pr_urls` (§4.4). "No changes anywhere" keeps today's failure message.
+
+### 10.4 The pointer-bump rule
+
+The runner **never commits or PRs submodule pointer updates in the meta repo**. Child PRs are unmerged when the run finishes (Heimdall never merges, §8), so a pointer bump would reference branch-tip SHAs — and a squash-merge on any child rewrites them, leaving the meta repo pointing at garbage-collectible commits. Pointer updates remain whatever post-merge process the org already runs. Consequence: a meta-repo PR only ever contains files the meta repo itself owns.
+
+### 10.5 Gateway changes
+
+- `SessionRecord.prUrl: string` → `prUrls: string[]` (+ optional `submodules: string[]`), with legacy single-string reads per §6.2.
+- Callback schema accepts `pr_urls` (and legacy `pr_url`); the `completed` summary lists every PR: "Done — pull requests ready: …".
+- `/runner/context`: PR review feedback (§5.2) is fetched for **each** URL in `prUrls` and grouped per PR in the prompt.
+- Prompt builder: when the session record has a non-empty `submodules`, add a layout section — "you are in a meta repo; these submodule directories are separate repositories, each on branch `<branch>`; edit and commit wherever the task requires; the harness pushes and opens PRs per repo". Absent for single repos, so existing prompts are byte-identical.
+
+### 10.6 Ticket experience (unchanged except the terminal message)
+
+Same thought → dispatch action → progress activities as §5.1. The terminal `response` lists one PR link per changed repo; every PR shares the Linear branch name, so Linear's GitHub integration attaches all of them to the issue. Follow-ups reply into the same session and update all open PRs; stop cancels the single run.
+
+### 10.7 Test matrix (must pass before M5 ships)
+
+Unit: `.gitmodules` parsing (absolute/relative/ssh URLs, non-GitHub hosts skipped), token-scope computation, legacy `prUrl`/`pr_url` reads, prompt with/without the layout section, per-PR feedback grouping. Webhook-level (gateway harness): `pr_urls` callback → multi-link response activity. E2E, both required: (a) **single sandbox repo** — full M1–M4 flow, verifying zero behavior change; (b) **sandbox meta repo with two child submodules** — a cross-repo task yields two child PRs and no pointer-bump commit, and a follow-up updates both.
