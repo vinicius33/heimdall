@@ -315,7 +315,7 @@ Some orgs invert the monorepo: a **meta repo** whose git submodules are the actu
 ### 10.1 Onboarding & routing
 
 - Route the Linear team key at the **meta repo** in `HEIMDALL_ROUTES`; `[repo=…]` override works as usual.
-- Only the meta repo gets the stub workflow and Actions secrets. Child repos need **neither** — the run executes in the meta repo.
+- Only the meta repo gets the stub workflow and Actions secrets. Child repos need **neither** — the run executes in the meta repo. This holds for the standalone variant too: orgs that copy-paste `stubs/heimdall-standalone.yml` (Actions policy blocks external reusable workflows) copy it into the meta repo only.
 - The GitHub App must be installed on the meta repo **and every child repo** it should be able to open PRs on. A submodule outside the installation is checked out read-only (if reachable) and skipped by the push loop with a logged warning surfaced in the completion message.
 
 ### 10.2 Scoped runner token — `POST /runner/token`
@@ -335,6 +335,8 @@ The run-scoped `github.token` cannot read private sibling repos or push to child
 3. **Push loop** (replaces the single push + PR steps): for the root and each writable submodule — commit leftover changes, and if the session branch has commits over the repo's default branch, push it and `gh pr create --repo <owner/repo>` (or find the existing PR by head branch) using the §10.2 token. Collect the PR URLs.
 4. **Pointer-bump guard**: in the root iteration, gitlink (submodule pointer) diffs are discarded before the commit check — see §10.4. A meta repo whose only "change" is pointer movement counts as unchanged.
 5. **Callbacks**: `completed` sends `pr_urls` (§4.4). "No changes anywhere" keeps today's failure message.
+
+All of the above must land in **both** `runner.yml` and `stubs/heimdall-standalone.yml` — the standalone copy does not receive upstream changes, so M5 is not done until the two are functionally equivalent (the §10.7 meta-repo e2e runs against the standalone variant, since meta-repo orgs are its primary audience). Rollout note: standalone copies in target repos update only when re-copied — old copies keep sending `pr_url`, which the gateway accepts indefinitely, so orgs upgrade whenever they onboard their meta repo, with no coordination.
 
 ### 10.4 The pointer-bump rule
 
