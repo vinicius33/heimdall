@@ -4,6 +4,7 @@ import {
   appAuth,
   cancelWorkflowRun,
   dispatchHeimdall,
+  fetchGitmodules,
   fetchPrFeedback,
   patAuth,
   type DispatchResult,
@@ -70,8 +71,10 @@ export interface Deps {
     clientPayload: Record<string, string>;
   }): Promise<DispatchResult>;
   cancelRun(token: string, repo: string, runId: number): Promise<void>;
-  /** Human review feedback on the session's PR, folded into follow-up prompts. */
+  /** Human review feedback on one of the session's PRs, folded into follow-up prompts. */
   prFeedback(token: string, prUrl: string): Promise<PrFeedbackItem[]>;
+  /** Raw .gitmodules content of the repo (ref, then default branch), null if absent. */
+  gitmodules(token: string, repo: string, ref?: string): Promise<string | null>;
   /**
    * Run work after the webhook response is sent. The webhook handler must
    * return fast (5s Linear limit); everything slow goes through here.
@@ -95,6 +98,7 @@ export function makeDeps(config: Config, store: Store): Deps {
     dispatch: dispatchHeimdall,
     cancelRun: cancelWorkflowRun,
     prFeedback: fetchPrFeedback,
+    gitmodules: fetchGitmodules,
     background(task) {
       void task().catch((err) => log('error', 'background task failed', { error: String(err) }));
     },

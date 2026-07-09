@@ -8,6 +8,12 @@
 #
 # Required Actions secrets: HEIMDALL_CALLBACK_SECRET and exactly one of
 # CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.
+#
+# Multi-repo sessions (SPEC §10): when this repo is a meta repo with git
+# submodules, they are checked out on the session branch too, and every repo
+# that changed gets its own push + PR (copy this file into the META repo only —
+# child repos need no workflow and no secrets, just the GitHub App install).
+# A repo without submodules follows the exact same path with a repo set of one.
 name: heimdall
 
 on:
@@ -26,7 +32,10 @@ jobs:
     timeout-minutes: 60
     # NOTE: CALLBACK_SECRET is deliberately step-scoped, not job-scoped —
     # job-level env is inherited by Claude's Bash subprocesses (readable via
-    # /proc/self/environ), and Claude runs on untrusted issue text.
+    # /proc/self/environ), and Claude runs on untrusted issue text. The same
+    # goes for the §10.2 repo token: persist-credentials is false and git auth
+    # is passed per step via GIT_CONFIG_* env, so no credential is on disk (or
+    # in the environment) during the Claude step.
     steps:
       - name: Parse payload
         id: p
@@ -57,26 +66,70 @@ jobs:
             -H "content-type: application/json" \
             -d @-
 
+      - name: Fetch repo token
+        # Session-scoped App installation token covering this repo + its
+        # GitHub-resolvable submodules (SPEC §10.2). Falls back to the
+        # run-scoped github.token, which is enough for a repo without
+        # submodules (and for gateways predating the /token endpoint).
+        id: repotoken
+        env:
+          CALLBACK_SECRET: ${{ secrets.HEIMDALL_CALLBACK_SECRET }}
+          CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
+          SESSION_ID: ${{ steps.p.outputs.session_id }}
+        run: |
+          if RESP=$(jq -n --arg sid "$SESSION_ID" '{session_id: $sid}' |
+            curl -fsS -X POST "$CALLBACK_URL/token" \
+              -H "authorization: Bearer $CALLBACK_SECRET" \
+              -H "content-type: application/json" \
+              -d @-); then
+            TOKEN=$(jq -r '.token // empty' <<<"$RESP")
+            if [ -n "$TOKEN" ]; then
+              echo "::add-mask::$TOKEN"
+              echo "token=$TOKEN" >>"$GITHUB_OUTPUT"
+            fi
+          else
+            echo "token endpoint unavailable — using the run-scoped token (single-repo mode)"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
+          token: ${{ steps.repotoken.outputs.token || github.token }}
+          # Never leave credentials in git config for the Claude step; the
+          # steps that need remote access get GIT_CONFIG_* env instead.
+          persist-credentials: false
 
-      - name: Prepare branch
+      - name: Prepare branches
         env:
           BRANCH: ${{ steps.p.outputs.branch }}
+          # Env-scoped git auth (github.com https + ssh remotes), gone after this step.
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ steps.repotoken.outputs.token || github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: 'https://github.com/'
+          GIT_CONFIG_KEY_1: url.https://x-access-token:${{ steps.repotoken.outputs.token || github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: 'git@github.com:'
         run: |
           # Identity of the Heimdall GitHub App's bot user (heimdall-bridge).
           # The id+slug email format is what makes GitHub attribute
           # commits/co-authorship to the right bot.
-          git config user.name "heimdall-bridge[bot]"
-          git config user.email "300811537+heimdall-bridge[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
-            git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-          else
-            git checkout -b "$BRANCH"
-          fi
+          prepare() {
+            git config user.name "heimdall-bridge[bot]"
+            git config user.email "300811537+heimdall-bridge[bot]@users.noreply.github.com"
+            if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+              git fetch origin "$BRANCH"
+              git checkout "$BRANCH"
+            else
+              git checkout -b "$BRANCH"
+            fi
+          }
+          prepare
+          # Same branch name in every submodule: it is the cross-repo
+          # correlation key, and it un-detaches submodule HEADs so the agent's
+          # commits land on the session branch (SPEC §10.3).
+          export -f prepare
+          git submodule foreach --recursive 'bash -c prepare'
 
       - name: Fetch prompt context
         env:
@@ -105,44 +158,99 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
-      - name: Push branch
+      - name: Push branches and open PRs
         id: push
         env:
-          BRANCH: ${{ steps.p.outputs.branch }}
-          ISSUE_ID: ${{ steps.p.outputs.issue_id }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            git add -A
-            git commit -m "chore: heimdall run artifacts for $ISSUE_ID"
-          fi
-          if [ "$(git rev-list --count "origin/$DEFAULT_BRANCH..HEAD")" = "0" ]; then
-            echo "changed=false" >>"$GITHUB_OUTPUT"
-          else
-            git push -u origin "$BRANCH"
-            echo "changed=true" >>"$GITHUB_OUTPUT"
-          fi
-
-      - name: Create or update PR
-        id: pr
-        if: steps.push.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.repotoken.outputs.token || github.token }}
           BRANCH: ${{ steps.p.outputs.branch }}
           ISSUE_ID: ${{ steps.p.outputs.issue_id }}
           ISSUE_TITLE: ${{ steps.p.outputs.issue_title }}
           ISSUE_URL: ${{ steps.p.outputs.issue_url }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ steps.repotoken.outputs.token || github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: 'https://github.com/'
+          GIT_CONFIG_KEY_1: url.https://x-access-token:${{ steps.repotoken.outputs.token || github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: 'git@github.com:'
         run: |
-          PR_URL=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url // empty')
-          if [ -z "$PR_URL" ]; then
-            PR_BODY="Automated by Heimdall for Linear issue [$ISSUE_ID]($ISSUE_URL)."
-            PR_BODY="$PR_BODY"$'\n\n'"🤖 Generated with [Claude Code](https://claude.com/claude-code)"
-            PR_URL=$(gh pr create \
-              --head "$BRANCH" \
-              --title "$ISSUE_ID: $ISSUE_TITLE" \
-              --body "$PR_BODY")
+          set -euo pipefail
+          PR_URLS_FILE="$RUNNER_TEMP/heimdall-pr-urls"
+          : >"$PR_URLS_FILE"
+
+          commit_leftovers() {
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              git add -A
+              git commit -m "chore: heimdall run artifacts for $ISSUE_ID"
+            fi
+          }
+
+          # Push the session branch and open (or find) the repo's PR.
+          # $1 = "owner/repo", $2 = base branch.
+          push_and_pr() {
+            if [ "$(git rev-list --count "origin/$2..HEAD")" = "0" ]; then
+              return 0
+            fi
+            git push -u origin "$BRANCH"
+            PR_URL=$(gh pr list --repo "$1" --head "$BRANCH" --json url --jq '.[0].url // empty')
+            if [ -z "$PR_URL" ]; then
+              PR_BODY="Automated by Heimdall for Linear issue [$ISSUE_ID]($ISSUE_URL)."
+              PR_BODY="$PR_BODY"$'\n\n'"🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+              PR_URL=$(gh pr create --repo "$1" --head "$BRANCH" --base "$2" \
+                --title "$ISSUE_ID: $ISSUE_TITLE" --body "$PR_BODY")
+            fi
+            echo "$PR_URL" >>"$PR_URLS_FILE"
+          }
+
+          SUBMODULE_PATHS=""
+          if [ -f .gitmodules ]; then
+            SUBMODULE_PATHS=$(git config --file .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}')
           fi
-          echo "pr_url=$PR_URL" >>"$GITHUB_OUTPUT"
+
+          # Children first, so a child failure aborts before the root PR exists.
+          for path in $SUBMODULE_PATHS; do
+            [ -e "$path/.git" ] || continue
+            (
+              cd "$path"
+              URL=$(git config --get remote.origin.url)
+              case "$URL" in
+                https://github.com/*) REPO="${URL#https://github.com/}" ;;
+                git@github.com:*) REPO="${URL#git@github.com:}" ;;
+                *)
+                  echo "skipping $path — origin is not on github.com"
+                  exit 0
+                  ;;
+              esac
+              REPO="${REPO%.git}"
+              commit_leftovers
+              CHILD_DEFAULT=$(gh api "repos/$REPO" --jq .default_branch)
+              git fetch origin "$CHILD_DEFAULT" --quiet
+              push_and_pr "$REPO" "$CHILD_DEFAULT"
+            )
+          done
+
+          # Root repo. Pointer-bump guard (SPEC §10.4): submodule pointer
+          # changes are unstaged before the commit check — the meta repo never
+          # PRs pointer updates; only files it owns itself.
+          commit_root_leftovers() {
+            git add -A
+            for p in $SUBMODULE_PATHS; do
+              git restore --staged "$p" 2>/dev/null || true
+            done
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: heimdall run artifacts for $ISSUE_ID"
+            fi
+          }
+          commit_root_leftovers
+          push_and_pr "$GITHUB_REPOSITORY" "$DEFAULT_BRANCH"
+
+          if [ -s "$PR_URLS_FILE" ]; then
+            {
+              echo "changed=true"
+              echo "pr_urls=$(jq -R . <"$PR_URLS_FILE" | jq -cs .)"
+            } >>"$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Report completed
         if: success() && steps.push.outputs.changed == 'true'
@@ -150,10 +258,11 @@ jobs:
           CALLBACK_SECRET: ${{ secrets.HEIMDALL_CALLBACK_SECRET }}
           CALLBACK_URL: ${{ steps.p.outputs.callback_url }}
           SESSION_ID: ${{ steps.p.outputs.session_id }}
-          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          PR_URLS: ${{ steps.push.outputs.pr_urls }}
         run: |
-          jq -n --arg sid "$SESSION_ID" --arg pr "$PR_URL" \
-            '{session_id: $sid, event: "completed", pr_url: $pr}' |
+          # pr_url (first entry) kept alongside pr_urls for gateways predating SPEC §10.
+          jq -n --arg sid "$SESSION_ID" --argjson urls "$PR_URLS" \
+            '{session_id: $sid, event: "completed", pr_urls: $urls, pr_url: $urls[0]}' |
           curl -fsS -X POST "$CALLBACK_URL/callback" \
             -H "authorization: Bearer $CALLBACK_SECRET" \
             -H "content-type: application/json" \

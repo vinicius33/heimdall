@@ -36,7 +36,13 @@ export class Store {
 
   async getSession(sessionId: string): Promise<SessionRecord | null> {
     const raw = await this.kv.get(`session:${sessionId}`);
-    return raw ? (JSON.parse(raw) as SessionRecord) : null;
+    if (!raw) return null;
+    // Records written before multi-repo support (SPEC §10) carry a single
+    // `prUrl` string; read it as a one-element list. TTL retires the shape.
+    const record = JSON.parse(raw) as SessionRecord & { prUrl?: string };
+    if (!record.prUrls && record.prUrl) record.prUrls = [record.prUrl];
+    delete record.prUrl;
+    return record;
   }
 
   async putSession(sessionId: string, record: SessionRecord): Promise<void> {
