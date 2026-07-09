@@ -12,18 +12,22 @@ import {
   LinearClient,
   verifyLinearWebhook,
 } from '@heimdall/linear';
+import { parseGitmodules } from '@heimdall/github';
 import type { Deps } from './deps';
 import { log } from './log';
 import { processCreated, processPrompted, processStop, processUnassigned } from './pipeline';
-import { buildPrompt } from './prompt';
+import { buildPrompt, type PrFeedback } from './prompt';
 
 const callbackSchema = z.object({
   session_id: z.string().min(1),
   event: z.enum(['started', 'progress', 'completed', 'failed']),
   run_url: z.string().url().optional(),
-  pr_url: z.string().url().optional(),
+  pr_url: z.string().url().optional(), // pre-§10 runners send the single-PR shape
+  pr_urls: z.array(z.string().url()).optional(),
   message: z.string().optional(),
 });
+
+const tokenRequestSchema = z.object({ session_id: z.string().min(1) });
 
 function safeEqual(a: string, b: string): boolean {
   const aBuf = Buffer.from(a);
@@ -178,10 +182,14 @@ export function createApp(deps: Deps): Hono {
         break;
       case 'completed': {
         record.status = 'completed';
-        record.prUrl = body.pr_url ?? record.prUrl;
-        const summary = body.pr_url
-          ? `Done — pull request ready: ${body.pr_url}`
-          : (body.message ?? 'Done.');
+        const prUrls = body.pr_urls ?? (body.pr_url ? [body.pr_url] : []);
+        if (prUrls.length > 0) record.prUrls = prUrls;
+        const summary =
+          prUrls.length > 1
+            ? `Done — pull requests ready:\n${prUrls.map((u) => `- ${u}`).join('\n')}`
+            : prUrls[0]
+              ? `Done — pull request ready: ${prUrls[0]}`
+              : (body.message ?? 'Done.');
         await deps.store.appendHistory(sessionId, { role: 'heimdall', body: summary });
         await createAgentActivity(client, {
           agentSessionId: sessionId,
@@ -212,22 +220,57 @@ export function createApp(deps: Deps): Hono {
       store.getContext(sessionId),
       store.getHistory(sessionId),
     ]);
-    let prFeedback: Awaited<ReturnType<Deps['prFeedback']>> = [];
-    if (record.prUrl) {
+    const feedback: PrFeedback[] = [];
+    if (record.prUrls?.length) {
       try {
+        // The root repo's installation token also reads the child repos' PRs
+        // (the push loop only ever opens PRs inside that installation, §10.2).
         const token = await deps.github.tokenFor(record.repo);
-        prFeedback = await deps.prFeedback(token, record.prUrl);
-        log('info', 'pr feedback included in context', {
-          sessionId,
-          prUrl: record.prUrl,
-          items: prFeedback.length,
-        });
+        for (const prUrl of record.prUrls) {
+          try {
+            const items = await deps.prFeedback(token, prUrl);
+            if (items.length > 0) feedback.push({ prUrl, items });
+            log('info', 'pr feedback included in context', { sessionId, prUrl, items: items.length });
+          } catch (err) {
+            // Feedback is an enrichment — never fail the run over it.
+            log('warn', 'could not fetch PR feedback', { sessionId, prUrl, error: String(err) });
+          }
+        }
       } catch (err) {
-        // Feedback is an enrichment — never fail the run over it.
-        log('warn', 'could not fetch PR feedback', { sessionId, error: String(err) });
+        log('warn', 'could not mint token for PR feedback', { sessionId, error: String(err) });
       }
     }
-    return c.text(buildPrompt(record, context, history, prFeedback));
+    return c.text(buildPrompt(record, context, history, feedback));
+  });
+
+  // ---- Scoped runner token (SPEC §10.2) ----
+  // Discovers the session repo's submodules, persists them on the record (the
+  // prompt's layout section derives from it), and mints an installation token
+  // scoped to exactly the session's repo set.
+  runner.post('/token', async (c) => {
+    const parsed = tokenRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('invalid token request body', 400);
+    const record = await store.getSession(parsed.data.session_id);
+    if (!record) return c.text('unknown session', 404);
+
+    const rootToken = await deps.github.tokenFor(record.repo);
+    const content = await deps.gitmodules(rootToken, record.repo, record.branch);
+    const submodules = content ? parseGitmodules(content, record.repo) : [];
+    record.submodules = submodules;
+    await store.putSession(parsed.data.session_id, record);
+
+    const scoped = await deps.github.scopedTokenFor([
+      record.repo,
+      ...submodules.map((s) => s.repo),
+    ]);
+    const skipped = submodules.filter((s) => !scoped.repos.includes(s.repo));
+    if (skipped.length > 0) {
+      log('warn', 'submodules outside the root installation are read-only', {
+        sessionId: parsed.data.session_id,
+        skipped: skipped.map((s) => s.repo),
+      });
+    }
+    return c.json({ token: scoped.token, repos: scoped.repos, expires_at: scoped.expiresAt });
   });
 
   app.route('/runner', runner);

@@ -83,10 +83,14 @@ function makeHarness(overrides: Partial<Deps> = {}) {
     config,
     store,
     linearFor: async () => fakeLinear(calls),
-    github: { tokenFor: jest.fn(async () => 'gh-token') },
+    github: {
+      tokenFor: jest.fn(async () => 'gh-token'),
+      scopedTokenFor: jest.fn(async (repos: string[]) => ({ token: 'gh-scoped', repos })),
+    },
     dispatch,
     cancelRun,
     prFeedback: jest.fn(async () => []),
+    gitmodules: jest.fn(async () => null),
     background: (task) => {
       background.push(task());
     },
@@ -178,7 +182,7 @@ describe('POST /webhooks/linear', () => {
       organizationId: 'org-1',
       repo: 'acme/backend',
       branch: 'heimdall/eng-42-login-broken',
-      prUrl: 'https://github.com/acme/backend/pull/9',
+      prUrls: ['https://github.com/acme/backend/pull/9'],
       status: 'completed',
       updatedAt: new Date().toISOString(),
     });
@@ -191,9 +195,9 @@ describe('POST /webhooks/linear', () => {
     });
     await flush();
 
-    expect((await store.getSession('sess-1'))?.prUrl).toBe(
+    expect((await store.getSession('sess-1'))?.prUrls).toEqual([
       'https://github.com/acme/backend/pull/9',
-    );
+    ]);
   });
 
   it('routes created events from an unmapped workspace via the catch-all table', async () => {
@@ -348,8 +352,34 @@ describe('/runner endpoints', () => {
     expect(res.status).toBe(200);
     expect(activityTypes(calls)).toEqual(['response']);
     const record = await store.getSession('sess-1');
-    expect(record?.prUrl).toBe('https://github.com/acme/backend/pull/99');
+    expect(record?.prUrls).toEqual(['https://github.com/acme/backend/pull/99']);
     expect(record?.status).toBe('completed');
+  });
+
+  it('maps completed with pr_urls -> one response listing every PR', async () => {
+    const { app, store, calls } = makeHarness();
+    await seedSession(store);
+    const res = await app.request('/runner/callback', {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: 'sess-1',
+        event: 'completed',
+        pr_urls: [
+          'https://github.com/acme/svc-a/pull/41',
+          'https://github.com/acme/svc-b/pull/87',
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const response = JSON.stringify(calls);
+    expect(response).toContain('pull requests ready');
+    expect(response).toContain('acme/svc-a/pull/41');
+    expect(response).toContain('acme/svc-b/pull/87');
+    expect((await store.getSession('sess-1'))?.prUrls).toEqual([
+      'https://github.com/acme/svc-a/pull/41',
+      'https://github.com/acme/svc-b/pull/87',
+    ]);
   });
 
   it('folds PR review feedback into follow-up prompts when the session has a PR', async () => {
@@ -360,7 +390,7 @@ describe('/runner endpoints', () => {
     const { app, store } = makeHarness({ prFeedback });
     await seedSession(store);
     const record = await store.getSession('sess-1');
-    record!.prUrl = 'https://github.com/acme/backend/pull/9';
+    record!.prUrls = ['https://github.com/acme/backend/pull/9'];
     await store.putSession('sess-1', record!);
 
     const res = await app.request('/runner/context/sess-1', { headers: authHeaders });
@@ -371,6 +401,27 @@ describe('/runner endpoints', () => {
     expect(prompt).toContain('`src/a.ts`:12');
   });
 
+  it('folds feedback from every PR of a multi-repo session, grouped per PR', async () => {
+    const prFeedback = jest.fn(async (_token: string, prUrl: string) => [
+      { author: 'felipe', body: `Comment on ${prUrl}` },
+    ]);
+    const { app, store } = makeHarness({ prFeedback });
+    await seedSession(store);
+    const record = await store.getSession('sess-1');
+    record!.prUrls = [
+      'https://github.com/acme/svc-a/pull/41',
+      'https://github.com/acme/svc-b/pull/87',
+    ];
+    await store.putSession('sess-1', record!);
+
+    const res = await app.request('/runner/context/sess-1', { headers: authHeaders });
+    const prompt = await res.text();
+    expect(prFeedback).toHaveBeenCalledTimes(2);
+    expect(prompt).toContain('(https://github.com/acme/svc-a/pull/41)');
+    expect(prompt).toContain('(https://github.com/acme/svc-b/pull/87)');
+    expect(prompt).toContain('Comment on https://github.com/acme/svc-a/pull/41');
+  });
+
   it('serves the context even when PR feedback fetching fails', async () => {
     const prFeedback = jest.fn(async () => {
       throw new Error('github down');
@@ -378,12 +429,93 @@ describe('/runner endpoints', () => {
     const { app, store } = makeHarness({ prFeedback });
     await seedSession(store);
     const record = await store.getSession('sess-1');
-    record!.prUrl = 'https://github.com/acme/backend/pull/9';
+    record!.prUrls = ['https://github.com/acme/backend/pull/9'];
     await store.putSession('sess-1', record!);
 
     const res = await app.request('/runner/context/sess-1', { headers: authHeaders });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('ENG-42');
+  });
+
+  it('adds the meta-repo layout section to the prompt when the session has submodules', async () => {
+    const { app, store } = makeHarness();
+    await seedSession(store);
+    const record = await store.getSession('sess-1');
+    record!.submodules = [
+      { path: 'services/a', repo: 'acme/svc-a' },
+      { path: 'services/b', repo: 'acme/svc-b' },
+    ];
+    await store.putSession('sess-1', record!);
+
+    const res = await app.request('/runner/context/sess-1', { headers: authHeaders });
+    const prompt = await res.text();
+    expect(prompt).toContain('Repository layout (meta repo)');
+    expect(prompt).toContain('`services/a` → acme/svc-a');
+    expect(prompt).toContain('pointer change in the root repo');
+
+    // and single-repo prompts stay clean
+    const single = makeHarness();
+    await seedSession(single.store);
+    const singlePrompt = await (
+      await single.app.request('/runner/context/sess-1', { headers: authHeaders })
+    ).text();
+    expect(singlePrompt).not.toContain('Repository layout');
+  });
+
+  it('mints a scoped token, discovering and persisting submodules', async () => {
+    const gitmodules = jest.fn(
+      async () => '[submodule "a"]\n\tpath = services/a\n\turl = https://github.com/acme/svc-a.git',
+    );
+    const scopedTokenFor = jest.fn(async () => ({
+      token: 'gh-scoped',
+      repos: ['acme/backend', 'acme/svc-a'],
+      expiresAt: '2026-07-09T17:00:00Z',
+    }));
+    const { app, store } = makeHarness({
+      gitmodules,
+      github: { tokenFor: jest.fn(async () => 'gh-token'), scopedTokenFor },
+    });
+    await seedSession(store);
+
+    const res = await app.request('/runner/token', {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'sess-1' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      token: 'gh-scoped',
+      repos: ['acme/backend', 'acme/svc-a'],
+      expires_at: '2026-07-09T17:00:00Z',
+    });
+    expect(gitmodules).toHaveBeenCalledWith('gh-token', 'acme/backend', 'heimdall/eng-42-login-broken');
+    expect(scopedTokenFor).toHaveBeenCalledWith(['acme/backend', 'acme/svc-a']);
+    expect((await store.getSession('sess-1'))?.submodules).toEqual([
+      { path: 'services/a', repo: 'acme/svc-a' },
+    ]);
+  });
+
+  it('mints a root-only token for a repo without submodules', async () => {
+    const { app, store } = makeHarness();
+    await seedSession(store);
+    const res = await app.request('/runner/token', {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'sess-1' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ token: 'gh-scoped', repos: ['acme/backend'] });
+    expect((await store.getSession('sess-1'))?.submodules).toEqual([]);
+  });
+
+  it('returns 404 for a token request on an unknown session', async () => {
+    const { app } = makeHarness();
+    const res = await app.request('/runner/token', {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'nope' }),
+    });
+    expect(res.status).toBe(404);
   });
 
   it('serves the assembled prompt with issue context and history', async () => {

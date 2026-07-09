@@ -1,5 +1,13 @@
 export type SessionStatus = 'dispatched' | 'running' | 'completed' | 'failed' | 'stopped';
 
+/** A git submodule of the session's root repo that resolves to a GitHub repo (SPEC §10). */
+export interface SubmoduleRef {
+  /** Path of the submodule working tree relative to the root repo. */
+  path: string;
+  /** "owner/name" on github.com. */
+  repo: string;
+}
+
 /** Redis record: session:{agentSessionId} (SPEC §6.2). */
 export interface SessionRecord {
   issueId: string;
@@ -8,22 +16,26 @@ export interface SessionRecord {
   issueUrl: string;
   organizationId: string;
   repo: string;
+  /** GitHub-resolvable submodules of `repo`, discovered by /runner/token (SPEC §10.2). */
+  submodules?: SubmoduleRef[];
   branch: string;
   runId?: number;
   runUrl?: string;
-  prUrl?: string;
+  /** One PR per repo the session changed; single-repo sessions have one entry (SPEC §10). */
+  prUrls?: string[];
   status: SessionStatus;
   updatedAt: string;
 }
 
 export type RunnerEvent = 'started' | 'progress' | 'completed' | 'failed';
 
-/** Body of POST /runner/callback (SPEC §4.4). */
+/** Body of POST /runner/callback (SPEC §4.4). `pr_url` is the pre-§10 single-PR shape. */
 export interface RunnerCallbackBody {
   session_id: string;
   event: RunnerEvent;
   run_url?: string;
   pr_url?: string;
+  pr_urls?: string[];
   message?: string;
 }
 

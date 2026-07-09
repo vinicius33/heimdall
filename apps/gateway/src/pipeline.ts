@@ -85,7 +85,7 @@ export async function processCreated(deps: Deps, event: AgentSessionEventPayload
       organizationId: event.organizationId,
       repo,
       branch: issue.branchName,
-      prUrl: previous?.repo === repo ? previous.prUrl : undefined,
+      prUrls: previous?.repo === repo ? previous.prUrls : undefined,
       status: 'dispatched',
       updatedAt: new Date().toISOString(),
     };
