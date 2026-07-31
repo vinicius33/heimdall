@@ -125,6 +125,12 @@ function activityTypes(calls: GraphQLCall[]): string[] {
     .map((call) => ((call.variables?.input as { content: { type: string } }).content ?? {}).type);
 }
 
+function activityBodies(calls: GraphQLCall[]): string[] {
+  return calls
+    .filter((call) => call.query.includes('agentActivityCreate'))
+    .map((call) => (call.variables?.input as { content: { body?: string } }).content?.body ?? '');
+}
+
 describe('POST /webhooks/linear', () => {
   it('rejects a bad signature', async () => {
     const { app } = makeHarness();
@@ -365,10 +371,7 @@ describe('/runner endpoints', () => {
       body: JSON.stringify({
         session_id: 'sess-1',
         event: 'completed',
-        pr_urls: [
-          'https://github.com/acme/svc-a/pull/41',
-          'https://github.com/acme/svc-b/pull/87',
-        ],
+        pr_urls: ['https://github.com/acme/svc-a/pull/41', 'https://github.com/acme/svc-b/pull/87'],
       }),
     });
     expect(res.status).toBe(200);
@@ -486,13 +489,69 @@ describe('/runner endpoints', () => {
     expect(await res.json()).toEqual({
       token: 'gh-scoped',
       repos: ['acme/backend', 'acme/svc-a'],
+      submodule_paths: ['services/a'],
       expires_at: '2026-07-09T17:00:00Z',
     });
-    expect(gitmodules).toHaveBeenCalledWith('gh-token', 'acme/backend', 'heimdall/eng-42-login-broken');
+    expect(gitmodules).toHaveBeenCalledWith(
+      'gh-token',
+      'acme/backend',
+      'heimdall/eng-42-login-broken',
+    );
     expect(scopedTokenFor).toHaveBeenCalledWith(['acme/backend', 'acme/svc-a']);
-    expect((await store.getSession('sess-1'))?.submodules).toEqual([
-      { path: 'services/a', repo: 'acme/svc-a' },
-    ]);
+    const record = await store.getSession('sess-1');
+    expect(record?.submodules).toEqual([{ path: 'services/a', repo: 'acme/svc-a' }]);
+    expect(record?.skippedSubmodules).toEqual([]);
+  });
+
+  it('omits submodules outside the installation from the paths the runner checks out', async () => {
+    // The whole point of §10.1: an unreachable private child must not reach
+    // `git submodule update`, or the checkout step fails and the run dies.
+    const gitmodules = jest.fn(
+      async () =>
+        '[submodule "a"]\n\tpath = services/a\n\turl = https://github.com/acme/svc-a.git\n' +
+        '[submodule "b"]\n\tpath = services/b\n\turl = git@github.com:other-org/svc-b.git',
+    );
+    const scopedTokenFor = jest.fn(async () => ({
+      token: 'gh-scoped',
+      repos: ['acme/backend', 'acme/svc-a'], // other-org/svc-b is a different installation
+      expiresAt: '2026-07-09T17:00:00Z',
+    }));
+    const { app, store } = makeHarness({
+      gitmodules,
+      github: { tokenFor: jest.fn(async () => 'gh-token'), scopedTokenFor },
+    });
+    await seedSession(store);
+
+    const res = await app.request('/runner/token', {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'sess-1' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ submodule_paths: ['services/a'] });
+    expect((await store.getSession('sess-1'))?.skippedSubmodules).toEqual(['other-org/svc-b']);
+  });
+
+  it('names skipped submodules in the completion message', async () => {
+    const { app, store, calls } = makeHarness();
+    await seedSession(store);
+    const record = (await store.getSession('sess-1'))!;
+    record.skippedSubmodules = ['other-org/svc-b'];
+    await store.putSession('sess-1', record);
+
+    await app.request('/runner/callback', {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: 'sess-1',
+        event: 'completed',
+        pr_urls: ['https://github.com/acme/backend/pull/99'],
+      }),
+    });
+    const body = activityBodies(calls).at(-1) as string;
+    expect(body).toContain('https://github.com/acme/backend/pull/99');
+    expect(body).toContain('other-org/svc-b');
+    expect(body).toContain('not installed');
   });
 
   it('mints a root-only token for a repo without submodules', async () => {

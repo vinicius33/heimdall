@@ -184,12 +184,21 @@ export function createApp(deps: Deps): Hono {
         record.status = 'completed';
         const prUrls = body.pr_urls ?? (body.pr_url ? [body.pr_url] : []);
         if (prUrls.length > 0) record.prUrls = prUrls;
-        const summary =
+        const base =
           prUrls.length > 1
             ? `Done — pull requests ready:\n${prUrls.map((u) => `- ${u}`).join('\n')}`
             : prUrls[0]
               ? `Done — pull request ready: ${prUrls[0]}`
               : (body.message ?? 'Done.');
+        // §10.1: submodules outside the App installation are skipped, not failed —
+        // say so, or their absence from the PR list looks like the agent ignored them.
+        const skipped = record.skippedSubmodules ?? [];
+        const summary =
+          skipped.length > 0
+            ? `${base}\n\nSkipped (the Heimdall GitHub App is not installed on them):\n${skipped
+                .map((r) => `- ${r}`)
+                .join('\n')}`
+            : base;
         await deps.store.appendHistory(sessionId, { role: 'heimdall', body: summary });
         await createAgentActivity(client, {
           agentSessionId: sessionId,
@@ -230,7 +239,11 @@ export function createApp(deps: Deps): Hono {
           try {
             const items = await deps.prFeedback(token, prUrl);
             if (items.length > 0) feedback.push({ prUrl, items });
-            log('info', 'pr feedback included in context', { sessionId, prUrl, items: items.length });
+            log('info', 'pr feedback included in context', {
+              sessionId,
+              prUrl,
+              items: items.length,
+            });
           } catch (err) {
             // Feedback is an enrichment — never fail the run over it.
             log('warn', 'could not fetch PR feedback', { sessionId, prUrl, error: String(err) });
@@ -257,20 +270,32 @@ export function createApp(deps: Deps): Hono {
     const content = await deps.gitmodules(rootToken, record.repo, record.branch);
     const submodules = content ? parseGitmodules(content, record.repo) : [];
     record.submodules = submodules;
-    await store.putSession(parsed.data.session_id, record);
 
     const scoped = await deps.github.scopedTokenFor([
       record.repo,
       ...submodules.map((s) => s.repo),
     ]);
+    // Submodules the scoped token cannot reach are never checked out: cloning a
+    // private repo the App is not installed on fails the whole checkout step,
+    // which would kill the run before Claude starts (SPEC §10.1).
+    const covered = submodules.filter((s) => scoped.repos.includes(s.repo));
     const skipped = submodules.filter((s) => !scoped.repos.includes(s.repo));
+    record.skippedSubmodules = skipped.map((s) => s.repo);
+    await store.putSession(parsed.data.session_id, record);
     if (skipped.length > 0) {
-      log('warn', 'submodules outside the root installation are read-only', {
+      log('warn', 'submodules outside the root installation are skipped', {
         sessionId: parsed.data.session_id,
-        skipped: skipped.map((s) => s.repo),
+        skipped: record.skippedSubmodules,
       });
     }
-    return c.json({ token: scoped.token, repos: scoped.repos, expires_at: scoped.expiresAt });
+    return c.json({
+      token: scoped.token,
+      repos: scoped.repos,
+      // Paths, not URLs: the runner inits exactly these, so it never has to
+      // reimplement relative/ssh .gitmodules URL resolution in bash.
+      submodule_paths: covered.map((s) => s.path),
+      expires_at: scoped.expiresAt,
+    });
   });
 
   app.route('/runner', runner);

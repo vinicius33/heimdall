@@ -91,6 +91,14 @@ jobs:
               echo "::add-mask::$TOKEN"
               echo "token=$TOKEN" >>"$GITHUB_OUTPUT"
             fi
+            # Newline-separated submodule paths the token can actually reach.
+            # Empty for a plain repo, and for gateways predating this field —
+            # both then behave as single-repo, which is the correct degradation.
+            {
+              echo 'submodule_paths<<EOF'
+              jq -r '.submodule_paths // [] | .[]' <<<"$RESP"
+              echo 'EOF'
+            } >>"$GITHUB_OUTPUT"
           else
             echo "token endpoint unavailable — using the run-scoped token (single-repo mode)"
           fi
@@ -99,11 +107,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
+          # Deliberately NOT `submodules: recursive` — that clones every entry in
+          # .gitmodules, and one unreachable private child (App not installed on
+          # its org) fails the step and kills the run before Claude starts. The
+          # next step inits only what the scoped token covers (SPEC §10.1/§10.3).
+          submodules: false
           token: ${{ steps.repotoken.outputs.token || github.token }}
           # Never leave credentials in git config for the Claude step; the
           # steps that need remote access get GIT_CONFIG_* env instead.
           persist-credentials: false
+
+      - name: Init reachable submodules
+        # No-op for a repo without submodules: SUBMODULE_PATHS is empty, so this
+        # is single-repo behavior bit for bit (SPEC §10 design invariant).
+        if: steps.repotoken.outputs.submodule_paths != ''
+        env:
+          SUBMODULE_PATHS: ${{ steps.repotoken.outputs.submodule_paths }}
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: url.https://x-access-token:${{ steps.repotoken.outputs.token || github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: 'https://github.com/'
+          GIT_CONFIG_KEY_1: url.https://x-access-token:${{ steps.repotoken.outputs.token || github.token }}@github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: 'git@github.com:'
+        run: |
+          set -euo pipefail
+          PATHS=()
+          while IFS= read -r p; do
+            [ -n "$p" ] && PATHS+=("$p")
+          done <<<"$SUBMODULE_PATHS"
+          [ ${#PATHS[@]} -gt 0 ] || exit 0
+          echo "initializing ${#PATHS[@]} reachable submodule(s):"
+          printf '  %s\n' "${PATHS[@]}"
+          git submodule update --init -- "${PATHS[@]}"
 
       - name: Prepare branches
         env:
@@ -209,7 +243,13 @@ jobs:
 
           # Children first, so a child failure aborts before the root PR exists.
           for path in $SUBMODULE_PATHS; do
-            [ -e "$path/.git" ] || continue
+            # Unpopulated == outside the App installation, so it was never
+            # checked out (SPEC §10.1). The gateway names these in the Linear
+            # completion message; log here so the run itself explains the gap.
+            if [ ! -e "$path/.git" ]; then
+              echo "skipping $path — not checked out (Heimdall App not installed on it)"
+              continue
+            fi
             (
               cd "$path"
               URL=$(git config --get remote.origin.url)
