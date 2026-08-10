@@ -152,22 +152,26 @@ jobs:
           # Identity of the Heimdall GitHub App's bot user (heimdall-bridge).
           # The id+slug email format is what makes GitHub attribute
           # commits/co-authorship to the right bot.
-          prepare() {
-            git config user.name "heimdall-bridge[bot]"
-            git config user.email "300811537+heimdall-bridge[bot]@users.noreply.github.com"
-            if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-              git fetch origin "$BRANCH"
-              git checkout "$BRANCH"
-            else
-              git checkout -b "$BRANCH"
-            fi
-          }
-          prepare
+          # A script file, not an exported function: `git submodule foreach`
+          # runs its command through /bin/sh (dash on ubuntu runners), and dash
+          # drops the invalid-identifier BASH_FUNC_* env vars that `export -f`
+          # relies on — the function arrives as "command not found" in CI.
+          cat >"$RUNNER_TEMP/heimdall-prepare.sh" <<'EOF'
+          set -euo pipefail
+          git config user.name "heimdall-bridge[bot]"
+          git config user.email "300811537+heimdall-bridge[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+          EOF
+          bash "$RUNNER_TEMP/heimdall-prepare.sh"
           # Same branch name in every submodule: it is the cross-repo
           # correlation key, and it un-detaches submodule HEADs so the agent's
           # commits land on the session branch (SPEC §10.3).
-          export -f prepare
-          git submodule foreach --recursive 'bash -c prepare'
+          git submodule foreach --recursive "bash '$RUNNER_TEMP/heimdall-prepare.sh'"
 
       - name: Fetch prompt context
         env:
