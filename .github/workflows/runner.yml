@@ -221,12 +221,16 @@ jobs:
           commit_leftovers() {
             if ! git diff --quiet || ! git diff --cached --quiet; then
               git add -A
-              git commit -m "chore: heimdall run artifacts for $ISSUE_ID"
+              git commit -m "$ISSUE_ID Add Heimdall run artifacts"
             fi
           }
 
           # Push the session branch and open (or find) the repo's PR.
           # $1 = "owner/repo", $2 = base branch.
+          # Commit and PR-title format is "<issue-id> <summary>" — no type prefix
+          # and no colon after the id. Conventional Commits (feat:/fix:/chore:)
+          # is rejected outright by some org commit-lint bots; this format passes
+          # both those and the permissive ones.
           push_and_pr() {
             if [ "$(git rev-list --count "origin/$2..HEAD")" = "0" ]; then
               return 0
@@ -237,7 +241,7 @@ jobs:
               PR_BODY="Automated by Heimdall for Linear issue [$ISSUE_ID]($ISSUE_URL)."
               PR_BODY="$PR_BODY"$'\n\n'"🤖 Generated with [Claude Code](https://claude.com/claude-code)"
               PR_URL=$(gh pr create --repo "$1" --head "$BRANCH" --base "$2" \
-                --title "$ISSUE_ID: $ISSUE_TITLE" --body "$PR_BODY")
+                --title "$ISSUE_ID $ISSUE_TITLE" --body "$PR_BODY")
             fi
             echo "$PR_URL" >>"$PR_URLS_FILE"
           }
@@ -284,7 +288,7 @@ jobs:
               git restore --staged "$p" 2>/dev/null || true
             done
             if ! git diff --cached --quiet; then
-              git commit -m "chore: heimdall run artifacts for $ISSUE_ID"
+              git commit -m "$ISSUE_ID Add Heimdall run artifacts"
             fi
           }
           commit_root_leftovers
