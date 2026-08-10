@@ -18,6 +18,11 @@ export interface SessionRecord {
   repo: string;
   /** GitHub-resolvable submodules of `repo`, discovered by /runner/token (SPEC §10.2). */
   submodules?: SubmoduleRef[];
+  /**
+   * Submodules outside the root's App installation: not checked out, not pushed,
+   * and named in the completion message (SPEC §10.1).
+   */
+  skippedSubmodules?: string[];
   branch: string;
   runId?: number;
   runUrl?: string;
