@@ -182,7 +182,9 @@ jobs:
         with:
           prompt_file: ${{ runner.temp }}/heimdall-prompt.md
           # The action's baked-in default model has been retired — always set one.
-          model: claude-sonnet-5
+          model: claude-opus-5
+          # effortLevel is the Claude Code reasoning-effort setting (low|medium|high|xhigh).
+          settings: '{"effortLevel": "medium"}'
           # Tool allowlist: keep network tools (WebFetch/WebSearch, curl/wget)
           # out — issue text is untrusted input (SPEC §8). Extend per repo as
           # needed (e.g. your test runner or build tools).

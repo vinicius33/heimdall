@@ -186,7 +186,9 @@ jobs:
         with:
           prompt_file: ${{ runner.temp }}/heimdall-prompt.md
           # The action's baked-in default model has been retired — always set one.
-          model: claude-sonnet-5
+          model: claude-opus-5
+          # effortLevel is the Claude Code reasoning-effort setting (low|medium|high|xhigh).
+          settings: '{"effortLevel": "medium"}'
           allowed_tools: ${{ inputs.allowed_tools }}
           max_turns: '50'
           # Set exactly one of these two as an Actions secret (SPEC §6.3).
